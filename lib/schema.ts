@@ -1,0 +1,49 @@
+import { z } from "zod";
+
+export const ReportSchema = z.object({
+  summary: z.string(),
+
+  estimated_score: z.object({
+    value: z.number().nullable(),
+    max: z.number().nullable(),
+
+    // ✅ IMPORTANT: use array length(2) instead of tuple to avoid schema errors
+    range: z.array(z.number()).length(2).nullable(),
+
+    confidence: z.enum(["low", "medium", "high"]),
+    assumptions: z.array(z.string()),
+  }),
+
+  strengths: z.array(z.string()),
+
+  weaknesses: z.array(
+    z.object({
+      topic: z.string(),
+      reason: z.string(),
+      severity: z.number().min(1).max(5),
+    })
+  ),
+
+  error_types: z.object({
+    conceptual: z.number().min(0).max(100),
+    careless: z.number().min(0).max(100),
+    time: z.number().min(0).max(100),
+    comprehension: z.number().min(0).max(100),
+  }),
+
+  top_actions: z.array(z.string()).min(3).max(8),
+
+  fourteen_day_plan: z.array(
+    z.object({
+      day: z.number().min(1).max(14),
+      focus: z.string(),
+      tasks: z.array(z.string()).min(2).max(6),
+      time_minutes: z.number().min(15).max(360),
+    })
+  ),
+
+
+  next_mock_strategy: z.array(z.string()).min(3).max(8),
+});
+
+export type Report = z.infer<typeof ReportSchema>;
