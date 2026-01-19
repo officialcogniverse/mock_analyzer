@@ -11,8 +11,26 @@ import { ensureSession } from "@/lib/userClient";
 import { Upload, Target, Clock, Brain, FileText } from "lucide-react";
 
 type Exam = "CAT" | "NEET" | "JEE";
-type Goal = "percentile" | "accuracy" | "speed" | "weak_topics";
+
+// UI-level goal choices (what user clicks)
+type GoalUI = "percentile" | "accuracy" | "speed" | "weak_topics";
+
+// API-level goal choices (what backend zod expects)
+type GoalApi = "score" | "accuracy" | "speed" | "concepts";
+
 type Struggle = "selection" | "time" | "concepts" | "careless" | "anxiety";
+
+function mapGoalToApi(goal: GoalUI): GoalApi {
+  if (goal === "percentile") return "score";
+  if (goal === "weak_topics") return "concepts";
+  // "accuracy" | "speed" are already valid API values
+  return goal;
+}
+
+function mapStruggleToApi(struggle: Struggle) {
+  // backend expects hardest: selection|time|concepts|careless|anxiety
+  return struggle;
+}
 
 export default function LandingPage() {
   const router = useRouter();
@@ -37,7 +55,7 @@ export default function LandingPage() {
   const [step, setStep] = useState(1);
 
   const [exam, setExam] = useState<Exam | null>(null);
-  const [goal, setGoal] = useState<Goal | null>(null);
+  const [goal, setGoal] = useState<GoalUI | null>(null);
   const [struggle, setStruggle] = useState<Struggle | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
@@ -81,24 +99,19 @@ export default function LandingPage() {
     setLoading(true);
     try {
       const intake = {
-        goal: goal === "percentile" ? "score" : goal,
-        hardest:
-          struggle === "selection"
-            ? "selection"
-            : struggle === "time"
-            ? "time"
-            : struggle === "concepts"
-            ? "concepts"
-            : struggle === "careless"
-            ? "careless"
-            : "anxiety",
-        weekly_hours: "10-20",
+        goal: mapGoalToApi(goal), // ✅ FIXED mapping
+        hardest: mapStruggleToApi(struggle),
+        weekly_hours: "10-20" as const,
       };
 
       const form = new FormData();
       form.append("exam", exam);
       form.append("intake", JSON.stringify(intake));
-      form.append("text", text);
+
+      // keep clean payload
+      const trimmed = text.trim();
+      if (trimmed) form.append("text", trimmed);
+
       if (file) form.append("file", file);
 
       const res = await fetch("/api/analyze", {
