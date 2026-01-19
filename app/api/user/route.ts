@@ -1,23 +1,22 @@
 import { NextResponse } from "next/server";
 import { upsertUser, getUser, updateUser } from "@/lib/persist";
+import { attachUserIdCookie, ensureUserId } from "@/lib/session";
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const userId = String(searchParams.get("userId") || "").trim();
-  if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 });
+  const session = ensureUserId(req);
 
-  await upsertUser(userId);
-  const user = await getUser(userId);
+  await upsertUser(session.userId);
+  const user = await getUser(session.userId);
 
-  return NextResponse.json({ user });
+  const res = NextResponse.json({ user });
+  if (session.isNew) attachUserIdCookie(res, session.userId);
+  return res;
 }
 
 export async function POST(req: Request) {
+  const session = ensureUserId(req);
   const body = await req.json();
-  const userId = String(body.userId || "").trim();
-  if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 });
-
-  await upsertUser(userId);
+  await upsertUser(session.userId);
 
   // only allow safe fields
   const patch: any = {};
@@ -28,6 +27,8 @@ export async function POST(req: Request) {
   if (body.coach?.tone) patch["coach.tone"] = body.coach.tone;
   if (body.coach?.style) patch["coach.style"] = body.coach.style;
 
-  const user = await updateUser(userId, patch);
-  return NextResponse.json({ user });
+  const user = await updateUser(session.userId, patch);
+  const res = NextResponse.json({ user });
+  if (session.isNew) attachUserIdCookie(res, session.userId);
+  return res;
 }

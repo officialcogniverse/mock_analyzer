@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { nanoid } from "nanoid";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import { ensureSession } from "@/lib/userClient";
 import { Upload, Target, Clock, Brain, FileText } from "lucide-react";
 
 type Exam = "CAT" | "NEET" | "JEE";
@@ -17,19 +17,21 @@ type Struggle = "selection" | "time" | "concepts" | "careless" | "anxiety";
 export default function LandingPage() {
   const router = useRouter();
 
-  // ✅ hydration-safe anonymous userId
-  const [userId, setUserId] = useState("");
+  const [sessionReady, setSessionReady] = useState(false);
 
   useEffect(() => {
-    const key = "cv_user_id";
-    const existing = localStorage.getItem(key);
-    if (existing) {
-      setUserId(existing);
-      return;
-    }
-    const id = nanoid(12);
-    localStorage.setItem(key, id);
-    setUserId(id);
+    let isMounted = true;
+    ensureSession()
+      .then(() => {
+        if (isMounted) setSessionReady(true);
+      })
+      .catch((error) => {
+        toast.error(error?.message || "Could not start session.");
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const [step, setStep] = useState(1);
@@ -61,7 +63,7 @@ export default function LandingPage() {
   async function onAnalyze() {
     if (!canAnalyze || !exam || !goal || !struggle) return;
 
-    if (!userId) {
+    if (!sessionReady) {
       toast.error("Session not ready. Please refresh once.");
       return;
     }
@@ -84,7 +86,6 @@ export default function LandingPage() {
       };
 
       const form = new FormData();
-      form.append("userId", userId); // ✅ important
       form.append("exam", exam);
       form.append("intake", JSON.stringify(intake));
       form.append("text", text);
@@ -131,16 +132,17 @@ export default function LandingPage() {
               Turn your mock into a clear 14-day improvement plan
             </p>
           </div>
-          <div className="flex justify-center pt-2">
+          <div className="flex justify-center gap-3 pt-2">
             <Button
               variant="secondary"
               onClick={() => router.push("/history")}
             >
               View my timeline
             </Button>
-          </div>
-          <div className="flex justify-center pt-2">
-            <Button variant="secondary" onClick={() => router.push("/history")}>
+            <Button
+              variant="secondary"
+              onClick={() => router.push("/dashboard")}
+            >
               View my dashboard
             </Button>
           </div>

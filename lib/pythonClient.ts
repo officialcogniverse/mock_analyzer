@@ -3,12 +3,15 @@ import type { AnalyzeInput } from "@/lib/types";
 export async function analyzeViaPython(input: AnalyzeInput) {
   const base = process.env.PY_ANALYZER_URL || "http://localhost:8000";
   const url = `${base}/analyze`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
 
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
-  });
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeout));
 
   const raw = await res.text(); // ✅ read raw text first
 

@@ -1,11 +1,9 @@
-import { nanoid } from "nanoid";
+export async function ensureSession() {
+  const res = await fetch("/api/session", { method: "POST" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || "Failed to start session");
+  }
 
-export function getOrCreateUserId(): string {
-  const key = "cv_user_id";
-  const existing = localStorage.getItem(key);
-  if (existing) return existing;
-
-  const id = nanoid(12);
-  localStorage.setItem(key, id);
-  return id;
+  return res.json().catch(() => ({}));
 }

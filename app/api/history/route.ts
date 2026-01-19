@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
 import { listAttempts, upsertUser } from "@/lib/persist";
+import { attachUserIdCookie, ensureUserId } from "@/lib/session";
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const userId = String(searchParams.get("userId") || "").trim();
+  const session = ensureUserId(req);
 
-  if (!userId) {
-    return NextResponse.json({ error: "Missing userId" }, { status: 400 });
-  }
+  await upsertUser(session.userId);
+  const items = await listAttempts(session.userId, 20);
 
-  await upsertUser(userId);
-  const items = await listAttempts(userId, 20);
-
-  return NextResponse.json({ items });
+  const res = NextResponse.json({ items });
+  if (session.isNew) attachUserIdCookie(res, session.userId);
+  return res;
 }
