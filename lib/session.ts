@@ -31,10 +31,7 @@ export function getUserIdFromRequest(req: Request): string | null {
 
 export function ensureUserId(req: Request): SessionResult {
   const existing = getUserIdFromRequest(req);
-  if (existing) {
-    return { userId: existing, isNew: false };
-  }
-
+  if (existing) return { userId: existing, isNew: false };
   return { userId: nanoid(12), isNew: true };
 }
 
@@ -44,5 +41,7 @@ export function attachUserIdCookie(res: NextResponse, userId: string) {
     sameSite: "lax",
     path: "/",
     maxAge: ONE_YEAR_SECONDS,
+    // ✅ secure only in production (prevents cookie issues on localhost)
+    secure: process.env.NODE_ENV === "production",
   });
 }

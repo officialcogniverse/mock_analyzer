@@ -44,6 +44,16 @@ export default function LandingPage() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Journey hint: if we have a last report id saved locally, show a CTA
+  const [lastReportId, setLastReportId] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const x = localStorage.getItem("cogniverse_last_report_id");
+      if (x) setLastReportId(x);
+    } catch {}
+  }, []);
+
   const progress = useMemo(() => (step / 4) * 100, [step]);
 
   const canGoNext = useMemo(() => {
@@ -106,11 +116,18 @@ export default function LandingPage() {
           toast.message(`Detected ${detected} scorecard — switched exam ✅`);
           return;
         }
-      
+
         toast.error(data?.error || "Analysis failed");
         return;
       }
-      
+
+      // Save journey pointer
+      try {
+        if (typeof window !== "undefined" && data?.id) {
+          localStorage.setItem("cogniverse_last_report_id", String(data.id));
+          setLastReportId(String(data.id));
+        }
+      } catch {}
 
       toast.success("Report ready 🚀");
       router.push(`/report/${data.id}`);
@@ -129,25 +146,30 @@ export default function LandingPage() {
           <div className="space-y-2 text-center">
             <h1 className="text-3xl font-bold">Cogniverse</h1>
             <p className="text-muted-foreground">
-              Turn your mock into a clear 14-day improvement plan
+              Turn your mock into a clear improvement plan (built for the next mock)
             </p>
           </div>
-          <div className="flex justify-center gap-3 pt-2">
-            <Button
-              variant="secondary"
-              onClick={() => router.push("/history")}
-            >
-              View my timeline
+
+          {/* Journey CTA (minimal distraction) */}
+          <div className="flex flex-col items-center gap-2 pt-2">
+            <Button variant="secondary" onClick={() => router.push("/history")}>
+              Continue my journey →
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => router.push("/dashboard")}
-            >
-              View my dashboard
-            </Button>
+
+            {lastReportId ? (
+              <button
+                type="button"
+                onClick={() => router.push(`/report/${lastReportId}`)}
+                className="text-xs text-muted-foreground hover:underline"
+              >
+                Resume last report
+              </button>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                Tip: analyze 2–3 mocks to unlock stronger learning behavior signals.
+              </div>
+            )}
           </div>
-
-
 
           {/* Progress */}
           <div className="space-y-2">
@@ -164,13 +186,22 @@ export default function LandingPage() {
                 <Target className="w-5 h-5" /> Choose your exam
               </h2>
               <div className="grid grid-cols-3 gap-4">
-                <Button variant={choiceBtn(exam === "CAT")} onClick={() => setExam("CAT")}>
+                <Button
+                  variant={choiceBtn(exam === "CAT")}
+                  onClick={() => setExam("CAT")}
+                >
                   CAT
                 </Button>
-                <Button variant={choiceBtn(exam === "NEET")} onClick={() => setExam("NEET")}>
+                <Button
+                  variant={choiceBtn(exam === "NEET")}
+                  onClick={() => setExam("NEET")}
+                >
                   NEET
                 </Button>
-                <Button variant={choiceBtn(exam === "JEE")} onClick={() => setExam("JEE")}>
+                <Button
+                  variant={choiceBtn(exam === "JEE")}
+                  onClick={() => setExam("JEE")}
+                >
                   JEE
                 </Button>
               </div>
@@ -184,16 +215,28 @@ export default function LandingPage() {
                 <Brain className="w-5 h-5" /> Your goal for next 14 days
               </h2>
               <div className="grid gap-3">
-                <Button variant={choiceBtn(goal === "percentile")} onClick={() => setGoal("percentile")}>
+                <Button
+                  variant={choiceBtn(goal === "percentile")}
+                  onClick={() => setGoal("percentile")}
+                >
                   Improve percentile 🚀
                 </Button>
-                <Button variant={choiceBtn(goal === "accuracy")} onClick={() => setGoal("accuracy")}>
+                <Button
+                  variant={choiceBtn(goal === "accuracy")}
+                  onClick={() => setGoal("accuracy")}
+                >
                   Improve accuracy 🎯
                 </Button>
-                <Button variant={choiceBtn(goal === "speed")} onClick={() => setGoal("speed")}>
+                <Button
+                  variant={choiceBtn(goal === "speed")}
+                  onClick={() => setGoal("speed")}
+                >
                   Improve speed ⚡
                 </Button>
-                <Button variant={choiceBtn(goal === "weak_topics")} onClick={() => setGoal("weak_topics")}>
+                <Button
+                  variant={choiceBtn(goal === "weak_topics")}
+                  onClick={() => setGoal("weak_topics")}
+                >
                   Strengthen weak topics 📚
                 </Button>
               </div>
@@ -207,19 +250,34 @@ export default function LandingPage() {
                 <Clock className="w-5 h-5" /> Where do you feel you lose marks?
               </h2>
               <div className="grid gap-3">
-                <Button variant={choiceBtn(struggle === "selection")} onClick={() => setStruggle("selection")}>
+                <Button
+                  variant={choiceBtn(struggle === "selection")}
+                  onClick={() => setStruggle("selection")}
+                >
                   Poor question selection
                 </Button>
-                <Button variant={choiceBtn(struggle === "time")} onClick={() => setStruggle("time")}>
+                <Button
+                  variant={choiceBtn(struggle === "time")}
+                  onClick={() => setStruggle("time")}
+                >
                   Time pressure
                 </Button>
-                <Button variant={choiceBtn(struggle === "concepts")} onClick={() => setStruggle("concepts")}>
+                <Button
+                  variant={choiceBtn(struggle === "concepts")}
+                  onClick={() => setStruggle("concepts")}
+                >
                   Concept gaps
                 </Button>
-                <Button variant={choiceBtn(struggle === "careless")} onClick={() => setStruggle("careless")}>
+                <Button
+                  variant={choiceBtn(struggle === "careless")}
+                  onClick={() => setStruggle("careless")}
+                >
                   Silly mistakes
                 </Button>
-                <Button variant={choiceBtn(struggle === "anxiety")} onClick={() => setStruggle("anxiety")}>
+                <Button
+                  variant={choiceBtn(struggle === "anxiety")}
+                  onClick={() => setStruggle("anxiety")}
+                >
                   Anxiety / panic
                 </Button>
               </div>
@@ -255,7 +313,11 @@ export default function LandingPage() {
                 />
               </div>
 
-              <Button onClick={onAnalyze} disabled={!canAnalyze || loading} className="w-full">
+              <Button
+                onClick={onAnalyze}
+                disabled={!canAnalyze || loading}
+                className="w-full"
+              >
                 {loading ? "Analyzing..." : "Analyze & Generate Plan 🚀"}
               </Button>
             </div>

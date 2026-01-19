@@ -7,6 +7,41 @@ export type CoachPersona = {
   style: "bullets" | "story" | "roast_light";
 };
 
+export type ProgressExam = "CAT" | "NEET" | "JEE";
+
+export type Probe = {
+  id: string; // stable id (e.g. "drill_accuracy_20q")
+  title: string;
+  description?: string;
+  // optional tags for future routing/analytics
+  tags?: string[];
+  // completion fields
+  done?: boolean;
+  doneAt?: string; // ISO string
+};
+
+export type UserProgressDoc = {
+  _id?: any;
+  userId: string;
+  exam: ProgressExam;
+  nextMockInDays?: number; // 2|4|7|14
+  minutesPerDay?: number; // 20|40|60|90
+  probes?: Probe[];
+  confidence?: number; // 0..100
+  updatedAt?: Date;
+  createdAt?: Date;
+};
+
+function normalizeExam(exam: any): ProgressExam | null {
+  const x = String(exam || "").trim().toUpperCase();
+  if (x === "CAT" || x === "NEET" || x === "JEE") return x;
+  return null;
+}
+
+function clamp(n: number, a: number, b: number) {
+  return Math.max(a, Math.min(b, n));
+}
+
 /**
  * Create or update anonymous user
  */
@@ -151,4 +186,120 @@ export async function updateUser(userId: string, patch: any) {
   );
 
   return users.findOne({ _id: userId });
+}
+
+/**
+ * -----------------------------
+ * Progress (NEW): probes + confidence + planner settings
+ * Collection: user_progress
+ * Key: { userId, exam }
+ * -----------------------------
+ */
+
+export async function getUserProgress(userId: string, exam: string) {
+  const ex = normalizeExam(exam);
+  if (!ex) return null;
+
+  const db = await getDb();
+  const col = db.collection<UserProgressDoc>("user_progress");
+  return col.findOne({ userId, exam: ex });
+}
+
+/**
+ * Upsert progress for a given user + exam.
+ * Only merges provided fields.
+ */
+export async function upsertUserProgress(params: {
+  userId: string;
+  exam: string;
+  patch: Partial<UserProgressDoc>;
+}) {
+  const ex = normalizeExam(params.exam);
+  if (!ex) throw new Error("Invalid exam");
+
+  const db = await getDb();
+  const col = db.collection<UserProgressDoc>("user_progress");
+
+  const safePatch: any = { ...params.patch };
+
+  if (typeof safePatch.confidence === "number") {
+    safePatch.confidence = clamp(Number(safePatch.confidence), 0, 100);
+  }
+  if (typeof safePatch.nextMockInDays === "number") {
+    safePatch.nextMockInDays = clamp(Number(safePatch.nextMockInDays), 2, 14);
+  }
+  if (typeof safePatch.minutesPerDay === "number") {
+    safePatch.minutesPerDay = clamp(Number(safePatch.minutesPerDay), 15, 180);
+  }
+
+  safePatch.updatedAt = new Date();
+
+  await col.updateOne(
+    { userId: params.userId, exam: ex },
+    {
+      $setOnInsert: { userId: params.userId, exam: ex, createdAt: new Date() },
+      $set: safePatch,
+    },
+    { upsert: true }
+  );
+
+  return col.findOne({ userId: params.userId, exam: ex });
+}
+
+/**
+ * Mark a probe done/undone and recompute confidence (simple v1 heuristic).
+ * Confidence is deliberately simple now; we can replace later with python engine.
+ */
+export async function toggleProbe(params: {
+  userId: string;
+  exam: string;
+  probe: Probe;
+  done: boolean;
+}) {
+  const ex = normalizeExam(params.exam);
+  if (!ex) throw new Error("Invalid exam");
+
+  const db = await getDb();
+  const col = db.collection<UserProgressDoc>("user_progress");
+
+  const existing = (await col.findOne({ userId: params.userId, exam: ex })) || {
+    userId: params.userId,
+    exam: ex,
+    probes: [],
+    confidence: 0,
+  };
+
+  const probes = Array.isArray(existing.probes) ? existing.probes.slice() : [];
+  const pid = String(params.probe?.id || "").trim();
+  if (!pid) throw new Error("Probe id missing");
+
+  const nowIso = new Date().toISOString();
+
+  const idx = probes.findIndex((p) => String(p.id) === pid);
+  const nextProbe: Probe = {
+    id: pid,
+    title: String(params.probe.title || "Probe"),
+    description: params.probe.description ? String(params.probe.description) : undefined,
+    tags: Array.isArray(params.probe.tags) ? params.probe.tags.map(String) : undefined,
+    done: !!params.done,
+    doneAt: params.done ? nowIso : undefined,
+  };
+
+  if (idx >= 0) probes[idx] = { ...probes[idx], ...nextProbe };
+  else probes.unshift(nextProbe);
+
+  // v1 confidence: base 35 + 8 * (#done in last 7 probes), capped at 95
+  const doneCount = probes.filter((p) => p.done).length;
+  const confidence = clamp(35 + doneCount * 8, 0, 95);
+
+  await col.updateOne(
+    { userId: params.userId, exam: ex },
+    {
+      $setOnInsert: { userId: params.userId, exam: ex, createdAt: new Date() },
+      $set: { probes, confidence, updatedAt: new Date() },
+    },
+    { upsert: true }
+  );
+
+  return col.findOne({ userId: params.userId, exam: ex });
 }

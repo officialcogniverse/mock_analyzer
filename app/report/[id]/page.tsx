@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Accordion,
@@ -34,6 +35,39 @@ function titleCase(x: string) {
     .join(" ");
 }
 
+type ProbeType = "topic_drill" | "execution_drill" | "review_drill";
+
+type Probe = {
+  id: string;
+  type: ProbeType;
+  title: string;
+  minutes: number;
+  instructions: string[];
+};
+
+type ProbeResultLocal = {
+  accuracy?: number; // 0-100
+  time_min?: number;
+  self_confidence?: number; // 1-5
+  notes?: string;
+};
+
+type ProgressDoc = {
+  userId?: string;
+  exam: string;
+  nextMockInDays: number;
+  minutesPerDay: number;
+  probes: Array<{
+    id: string;
+    title: string;
+    done: boolean;
+    doneAt?: string | null;
+    tags?: string[];
+  }>;
+  confidence: number; // 0..100 (we will write computed value here)
+  updatedAt?: string;
+};
+
 export default function ReportPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -41,9 +75,55 @@ export default function ReportPage() {
   const [data, setData] = useState<ApiOk | null>(null);
   const [error, setError] = useState<string>("");
 
-  // insights fetched per exam (includes learning_behavior)
   const [insights, setInsights] = useState<any | null>(null);
 
+  // DB-backed progress per exam
+  const [progressDoc, setProgressDoc] = useState<ProgressDoc | null>(null);
+  const [progressLoading, setProgressLoading] = useState(false);
+
+  // local-only probe metrics per attempt
+  const localProbeKey = useMemo(() => `cogniverse_probe_metrics_${id}`, [id]);
+  const [probeMetrics, setProbeMetrics] = useState<
+    Record<string, ProbeResultLocal>
+  >({});
+
+  // store last report id so History can “Continue journey”
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem("cogniverse_last_report_id", String(id));
+    } catch {}
+  }, [id]);
+
+  // load local probe metrics
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(localProbeKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") setProbeMetrics(parsed);
+    } catch {}
+  }, [localProbeKey]);
+
+  // persist local probe metrics
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(localProbeKey, JSON.stringify(probeMetrics));
+    } catch {}
+  }, [localProbeKey, probeMetrics]);
+
+  function setProbeMetric(probeId: string, patch: Partial<ProbeResultLocal>) {
+    setProbeMetrics((prev) => ({
+      ...prev,
+      [probeId]: { ...(prev[probeId] || {}), ...patch },
+    }));
+  }
+
+  // ------------------------
+  // Load report
+  // ------------------------
   useEffect(() => {
     (async () => {
       try {
@@ -71,22 +151,40 @@ export default function ReportPage() {
     })();
   }, [id]);
 
-  // fetch insights when exam is known
+  const r = data?.report;
+
+  // ------------------------
+  // Load insights + progress once exam is known
+  // ------------------------
   useEffect(() => {
     if (!data?.exam) return;
     let active = true;
 
     (async () => {
       try {
-        const res = await fetch(
+        // insights
+        const insRes = await fetch(
           `/api/insights?exam=${encodeURIComponent(data.exam)}&lastN=10`
         );
-        if (!res.ok) return;
-        const json = await res.json();
-        if (!active) return;
-        setInsights(json);
+        if (insRes.ok) {
+          const ins = await insRes.json();
+          if (active) setInsights(ins);
+        }
+
+        // progress
+        setProgressLoading(true);
+        const prRes = await fetch(
+          `/api/progress?exam=${encodeURIComponent(data.exam)}`
+        );
+        const pr = await prRes.json();
+        if (prRes.ok && active) {
+          // Some routes return { progress }, some return full doc
+          setProgressDoc(pr?.progress || pr || null);
+        }
       } catch {
-        // ignore insights errors; report still renders fine
+        // ignore
+      } finally {
+        if (active) setProgressLoading(false);
       }
     })();
 
@@ -95,102 +193,101 @@ export default function ReportPage() {
     };
   }, [data?.exam]);
 
-  const r = data?.report;
+  // Planner values from DB (fallback defaults)
+  const nextMockInDays = useMemo(() => {
+    const v = Number(progressDoc?.nextMockInDays);
+    return [2, 4, 7, 14].includes(v) ? (v as 2 | 4 | 7 | 14) : 7;
+  }, [progressDoc]);
 
-  const vibe = useMemo(() => {
-    const conf = r?.estimated_score?.confidence;
-    if (conf === "high") return "🔥 Locked in";
-    if (conf === "medium") return "⚡ On the rise";
-    return "🌱 Building momentum";
-  }, [r]);
+  const minutesPerDay = useMemo(() => {
+    const v = Number(progressDoc?.minutesPerDay);
+    return [20, 40, 60, 90].includes(v) ? (v as 20 | 40 | 60 | 90) : 40;
+  }, [progressDoc]);
 
-  // Focus XP derived from weaknesses severity (simple + fun)
-  const focusXP = useMemo(() => {
-    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
-    const raw = weaknesses.reduce(
-      (sum: number, w: any) => sum + (Number(w?.severity) || 0) * 10,
-      0
-    );
-    return Math.min(100, Math.max(0, raw));
-  }, [r]);
+  async function savePlanner(patch: {
+    nextMockInDays?: number;
+    minutesPerDay?: number;
+  }) {
+    if (!data?.exam) return;
+    try {
+      // optimistic UI
+      setProgressDoc((prev) =>
+        prev
+          ? ({ ...prev, ...patch } as ProgressDoc)
+          : ({
+              exam: data.exam,
+              nextMockInDays: patch.nextMockInDays ?? 7,
+              minutesPerDay: patch.minutesPerDay ?? 40,
+              probes: [],
+              confidence: 0,
+            } as ProgressDoc)
+      );
 
-  // Trap chips derived from weakness topics
-  const traps = useMemo(() => {
-    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
-    return weaknesses
-      .map((w: any) => String(w?.topic || "").trim())
-      .filter(Boolean)
-      .slice(0, 8);
-  }, [r]);
+      const res = await fetch("/api/progress", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ exam: data.exam, ...patch }),
+      });
+      const json = await res.json();
+      if (res.ok) setProgressDoc(json?.progress || json || null);
+    } catch {
+      // ignore
+    }
+  }
 
-  // Next mock strategy with learning_behavior tweaks appended (if available)
-  const nextMockStrategy = useMemo(() => {
-    const base = Array.isArray(r?.next_mock_strategy)
-      ? r.next_mock_strategy
+  function scaleTasks(tasks: string[], factor: number) {
+    const safe = Array.isArray(tasks) ? tasks : [];
+    if (!safe.length) return safe;
+
+    if (factor <= 0.75)
+      return safe.slice(0, Math.max(2, Math.ceil(safe.length * 0.6)));
+    if (factor <= 1.0)
+      return safe.slice(0, Math.max(3, Math.ceil(safe.length * 0.8)));
+    if (factor >= 1.5) return safe;
+    return safe;
+  }
+
+  const plannedDays = useMemo(
+    () => Math.max(2, Math.min(14, Number(nextMockInDays || 7))),
+    [nextMockInDays]
+  );
+
+  const adjustedPlan = useMemo(() => {
+    const basePlan = Array.isArray(r?.fourteen_day_plan)
+      ? r.fourteen_day_plan
       : [];
+    if (!basePlan.length) return [];
 
-    const lb = insights?.learning_behavior;
-    if (!lb) return base;
+    const factor = Number(minutesPerDay) / 40;
+    const slice = basePlan.slice(0, plannedDays);
 
-    const tweaks: string[] = [];
-    const cadence = String(lb.cadence || "");
-    const executionStyle = String(lb.execution_style || "");
-    const responsiveness = String(lb.responsiveness || "");
-    const stuckLoop = lb?.stuck_loop || {};
+    return slice.map((dayObj: any) => {
+      const baseMinutes = Number(dayObj?.time_minutes) || 40;
+      const newMinutes = Math.max(15, Math.round(baseMinutes * factor));
+      const newTasks = scaleTasks(dayObj?.tasks || [], factor);
+      return { ...dayObj, time_minutes: newMinutes, tasks: newTasks };
+    });
+  }, [r, plannedDays, minutesPerDay]);
 
-    if (cadence === "sporadic") {
-      tweaks.push(
-        "Cadence has been sporadic—lock the next mock to a fixed day/time and protect that slot."
-      );
-    } else if (cadence === "binge") {
-      tweaks.push(
-        "Avoid binge cycles—space mocks 2–3 days apart so fixes have time to stick."
-      );
-    }
-
-    if (executionStyle === "panic_cycle") {
-      tweaks.push(
-        "Start the mock slower: build accuracy in the first 20% and add time checkpoints per section."
-      );
-    } else if (executionStyle === "speed_over_control") {
-      tweaks.push(
-        "Add accuracy checkpoints: cap guesses and mark 2–3 questions to return to after the sweep."
-      );
-    } else if (executionStyle === "control_over_speed") {
-      tweaks.push("Inject 1–2 timed sprints to raise pace without losing method.");
-    }
-
-    if (stuckLoop?.active && stuckLoop?.topic) {
-      tweaks.push(
-        `Break the loop on ${stuckLoop.topic}: drill it before the next mock, then re-test it early.`
-      );
-    }
-
-    if (responsiveness === "declining") {
-      tweaks.push(
-        "Your last few mocks dipped—do a micro-fix session before taking the next full mock."
-      );
-    }
-
-    // Keep it tight: max 2 unique tweaks
-    const uniqueTweaks = Array.from(new Set(tweaks)).slice(0, 2);
-    return [...base, ...uniqueTweaks];
-  }, [insights, r]);
-
-  // Learning behavior display (safe)
+  // learning behavior
   const lb = insights?.learning_behavior || null;
 
   const lbChips = useMemo(() => {
     if (!lb) return [];
-    const chips: { label: string; variant?: "secondary" | "destructive" }[] = [];
+    const chips: { label: string; variant?: "secondary" | "destructive" }[] =
+      [];
 
     if (lb.cadence && lb.cadence !== "unknown") {
-      chips.push({ label: `Cadence: ${titleCase(lb.cadence)}`, variant: "secondary" });
+      chips.push({
+        label: `Cadence: ${titleCase(lb.cadence)}`,
+        variant: "secondary",
+      });
     }
     if (lb.execution_style && lb.execution_style !== "unknown") {
       chips.push({
         label: `Execution: ${titleCase(lb.execution_style)}`,
-        variant: lb.execution_style === "panic_cycle" ? "destructive" : "secondary",
+        variant:
+          lb.execution_style === "panic_cycle" ? "destructive" : "secondary",
       });
     }
     if (lb.responsiveness && lb.responsiveness !== "unknown") {
@@ -200,42 +297,352 @@ export default function ReportPage() {
       });
     }
     if (lb?.stuck_loop?.active && lb?.stuck_loop?.topic) {
-      chips.push({ label: `Stuck loop: ${lb.stuck_loop.topic}`, variant: "destructive" });
+      chips.push({
+        label: `Stuck loop: ${lb.stuck_loop.topic}`,
+        variant: "destructive",
+      });
     }
     if (lb.confidence) {
-      chips.push({ label: `Confidence: ${titleCase(lb.confidence)}`, variant: "secondary" });
+      chips.push({
+        label: `Signal confidence: ${titleCase(lb.confidence)}`,
+        variant: "secondary",
+      });
     }
     return chips.slice(0, 6);
   }, [lb]);
 
-  // Daily streak UI only (no accounts); optional: save locally
-  const [streakDone, setStreakDone] = useState<boolean[]>(() => {
-    if (typeof window === "undefined") return Array(7).fill(false);
-    try {
-      const saved = localStorage.getItem("cogniverse_streak_7");
-      if (!saved) return Array(7).fill(false);
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length === 7) return parsed;
-      return Array(7).fill(false);
-    } catch {
-      return Array(7).fill(false);
-    }
-  });
+  const vibe = useMemo(() => {
+    const conf = r?.estimated_score?.confidence;
+    if (conf === "high") return "🔥 Locked in";
+    if (conf === "medium") return "⚡ On the rise";
+    return "🌱 Building momentum";
+  }, [r]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      localStorage.setItem("cogniverse_streak_7", JSON.stringify(streakDone));
-    } catch {}
-  }, [streakDone]);
+  const focusXP = useMemo(() => {
+    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
+    const raw = weaknesses.reduce(
+      (sum: number, w: any) => sum + (Number(w?.severity) || 0) * 10,
+      0
+    );
+    return Math.min(100, Math.max(0, raw));
+  }, [r]);
 
-  function toggleStreak(i: number) {
-    setStreakDone((prev) => {
-      const next = [...prev];
-      next[i] = !next[i];
-      return next;
+  const traps = useMemo(() => {
+    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
+    return weaknesses
+      .map((w: any) => String(w?.topic || "").trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }, [r]);
+
+  // --- Probe pack generation (deterministic, based on report) ---
+  const probes: Probe[] = useMemo(() => {
+    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
+    const topWeak = weaknesses.slice(0, 2).map((w: any, i: number) => {
+      const topic =
+        String(w?.topic || `Weakness ${i + 1}`).trim() ||
+        `Weakness ${i + 1}`;
+      const sev = Number(w?.severity || 3);
+      const mins = sev >= 4 ? 20 : 15;
+
+      return {
+        id: `topic_${i}_${topic.toLowerCase().replace(/\s+/g, "_").slice(0, 30)}`,
+        type: "topic_drill" as const,
+        title: `Topic drill: ${topic}`,
+        minutes: mins,
+        instructions: [
+          `Do a focused set on ${topic} (10–20 questions).`,
+          "Mark every wrong answer: why wrong? concept vs careless vs time.",
+          "Write 3 takeaway rules (what you’ll do differently next time).",
+        ],
+      };
     });
+
+    const errorTypes = r?.error_types || {};
+    const entries = Object.entries(errorTypes || {}).map(
+      ([k, v]) => [k, Number(v || 0)] as const
+    );
+    const dominant = entries.length
+      ? entries.sort((a, b) => (b[1] || 0) - (a[1] || 0))[0][0]
+      : "";
+
+    const execProbe: Probe = {
+      id: `exec_${String(dominant || "balanced")}`,
+      type: "execution_drill",
+      title:
+        dominant === "time"
+          ? "Execution drill: Time checkpoints"
+          : dominant === "careless"
+          ? "Execution drill: Accuracy checkpoints"
+          : dominant === "comprehension"
+          ? "Execution drill: Read-first, solve-second"
+          : "Execution drill: Balanced sprint",
+      minutes: 15,
+      instructions:
+        dominant === "time"
+          ? [
+              "Do a 12-minute sprint: solve 8–10 medium questions.",
+              "Checkpoint at 6 min: if stuck >60s, skip & return later.",
+              "Goal: controlled skipping (no late panic).",
+            ]
+          : dominant === "careless"
+          ? [
+              "Do a slow-accuracy set: 8–10 easy/medium questions.",
+              "Rule: before final answer, do a 5-second sanity check.",
+              "Goal: reduce silly errors without killing speed.",
+            ]
+          : dominant === "comprehension"
+          ? [
+              "Do 6–8 questions with strict method: Read → rephrase → solve.",
+              "Underline/mark key constraints before touching options.",
+              "Goal: prevent misreads and trap attempts.",
+            ]
+          : [
+              "Do a 10-minute sprint: 6–8 questions under a timer.",
+              "After each, tag your error type (if wrong).",
+              "Goal: stable execution under light time pressure.",
+            ],
+    };
+
+    const reviewProbe: Probe = {
+      id: "review_mistakes",
+      type: "review_drill",
+      title: "Review drill: Error audit",
+      minutes: 15,
+      instructions: [
+        "Pick 6 wrong questions from your mock.",
+        "For each: write (1) why wrong, (2) correct method, (3) your rule.",
+        "Goal: convert mistakes into repeatable rules.",
+      ],
+    };
+
+    return [...topWeak, execProbe, reviewProbe].slice(0, 5);
+  }, [r]);
+
+  // ✅ Map of done probes from DB
+  const doneMap = useMemo(() => {
+    const m: Record<string, boolean> = {};
+    (progressDoc?.probes || []).forEach((p) => {
+      m[p.id] = !!p.done;
+    });
+    return m;
+  }, [progressDoc]);
+
+  const doneCount = useMemo(
+    () => probes.filter((p) => doneMap[p.id]).length,
+    [probes, doneMap]
+  );
+
+  // ✅ OPTIONAL: Seed probe list into DB once (only if empty)
+  useEffect(() => {
+    if (!data?.exam) return;
+    if (!probes.length) return;
+
+    const existing = (progressDoc?.probes || []).length;
+    if (existing) return;
+
+    // seed in background; OK if route ignores probes patch
+    fetch("/api/progress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        exam: data.exam,
+        probes: probes.map((p) => ({
+          id: p.id,
+          title: p.title,
+          done: false,
+          doneAt: null,
+          tags: [p.type],
+        })),
+      }),
+    })
+      .then((r) => r.json())
+      .then((j) => {
+        if (j?.progress) setProgressDoc(j.progress);
+      })
+      .catch(() => {});
+  }, [data?.exam, probes, progressDoc?.probes]);
+
+  async function toggleProbeDone(probe: Probe, done: boolean) {
+    if (!data?.exam) return;
+
+    // optimistic UI
+    setProgressDoc((prev) => {
+      const base: ProgressDoc =
+        prev ||
+        ({
+          exam: data.exam,
+          nextMockInDays: 7,
+          minutesPerDay: 40,
+          probes: [],
+          confidence: 0,
+        } as any);
+
+      const existing = (base.probes || []).slice();
+      const idx = existing.findIndex((x) => x.id === probe.id);
+      if (idx >= 0) {
+        existing[idx] = {
+          ...existing[idx],
+          done,
+          doneAt: done ? new Date().toISOString() : null,
+        };
+      } else {
+        existing.push({
+          id: probe.id,
+          title: probe.title,
+          done,
+          doneAt: done ? new Date().toISOString() : null,
+          tags: [probe.type],
+        });
+      }
+      return { ...base, probes: existing };
+    });
+
+    try {
+      const res = await fetch("/api/progress", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          exam: data.exam,
+          action: "toggle_probe",
+          probe: { id: probe.id, title: probe.title, tags: [probe.type] },
+          done,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) setProgressDoc(json?.progress || json || null);
+    } catch {
+      // ignore
+    }
   }
+
+  // ✅ Confidence score (computed in UI; we persist it to DB)
+  const confidenceScore = useMemo(() => {
+    // completion 0..50 + perf 0..30 + behavior 0..20
+    const total = probes.length || 1;
+    const completion = Math.round((doneCount / total) * 50);
+
+    const doneProbes = probes.filter((p) => doneMap[p.id]);
+    const doneMetrics = doneProbes.map((p) => probeMetrics[p.id] || {});
+    let perf = 0;
+
+    if (doneMetrics.length) {
+      const accs = doneMetrics
+        .map((x) => (Number.isFinite(Number(x.accuracy)) ? Number(x.accuracy) : NaN))
+        .filter((n) => !Number.isNaN(n));
+      const avgAcc = accs.length ? accs.reduce((a, b) => a + b, 0) / accs.length : 0;
+
+      const confs = doneMetrics
+        .map((x) =>
+          Number.isFinite(Number(x.self_confidence))
+            ? Number(x.self_confidence)
+            : NaN
+        )
+        .filter((n) => !Number.isNaN(n));
+      const avgSelf = confs.length ? confs.reduce((a, b) => a + b, 0) / confs.length : 0;
+
+      const accPart = Math.round((Math.max(0, Math.min(100, avgAcc)) / 100) * 20);
+      const selfPart = Math.round((Math.max(0, Math.min(5, avgSelf)) / 5) * 10);
+      perf = accPart + selfPart; // 0..30
+    }
+
+    let beh = 10; // neutral
+    if (lb) {
+      beh = 0;
+      const cadence = String(lb.cadence || "");
+      const resp = String(lb.responsiveness || "");
+      const loop = !!lb?.stuck_loop?.active;
+
+      if (cadence === "steady") beh += 8;
+      if (cadence === "sporadic") beh += 4;
+      if (cadence === "binge") beh += 3;
+
+      if (resp === "improving") beh += 8;
+      if (resp === "flat") beh += 5;
+      if (resp === "declining") beh += 3;
+
+      if (!loop) beh += 4;
+    }
+    beh = Math.max(0, Math.min(20, beh));
+
+    return Math.max(0, Math.min(100, completion + perf + beh));
+  }, [probes, doneCount, doneMap, probeMetrics, lb]);
+
+  const confidenceLabel = useMemo(() => {
+    if (confidenceScore >= 80) return "High";
+    if (confidenceScore >= 60) return "Medium";
+    if (confidenceScore >= 40) return "Building";
+    return "Low";
+  }, [confidenceScore]);
+
+  // ✅ Persist confidence to DB (so History shows same number)
+  useEffect(() => {
+    if (!data?.exam) return;
+
+    const t = setTimeout(() => {
+      fetch("/api/progress", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          exam: data.exam,
+          confidence: confidenceScore,
+        }),
+      })
+        .then((r) => r.json())
+        .then((j) => {
+          // if server returns updated progress, sync it
+          if (j?.progress) setProgressDoc(j.progress);
+        })
+        .catch(() => {});
+    }, 500);
+
+    return () => clearTimeout(t);
+  }, [data?.exam, confidenceScore]);
+
+  const nextMockStrategy = useMemo(() => {
+    const base = Array.isArray(r?.next_mock_strategy) ? r.next_mock_strategy : [];
+    const tweaks: string[] = [];
+
+    if (lb) {
+      const cadence = String(lb.cadence || "");
+      const executionStyle = String(lb.execution_style || "");
+      const responsiveness = String(lb.responsiveness || "");
+      const stuckLoop = lb?.stuck_loop || {};
+
+      if (cadence === "sporadic")
+        tweaks.push("Cadence has been sporadic—lock the next mock to a fixed day/time.");
+      else if (cadence === "binge")
+        tweaks.push("Avoid binge cycles—space mocks 2–3 days apart.");
+
+      if (executionStyle === "panic_cycle")
+        tweaks.push("Start slower: build accuracy in first 20% + checkpoints.");
+      else if (executionStyle === "speed_over_control")
+        tweaks.push("Add accuracy checkpoints: cap guesses + return later.");
+      else if (executionStyle === "control_over_speed")
+        tweaks.push("Inject 1–2 timed sprints to raise pace safely.");
+
+      if (stuckLoop?.active && stuckLoop?.topic)
+        tweaks.push(`Break loop on ${stuckLoop.topic}: drill it before next mock.`);
+      if (responsiveness === "declining")
+        tweaks.push("Do a micro-fix session before the full mock.");
+    }
+
+    let scheduleTweak: string | null = null;
+    if (nextMockInDays <= 2)
+      scheduleTweak = "Mock is very soon—micro-fix today + 1 timed sectional.";
+    else if (nextMockInDays <= 4)
+      scheduleTweak = "Short runway—fix top 2 weaknesses + 1 sectional, then full mock.";
+    else if (nextMockInDays <= 7)
+      scheduleTweak = "Use week: 2 sectionals + fix top 2 weaknesses before full mock.";
+    else
+      scheduleTweak = "Steady cadence: daily revise + weekly sectionals + full mock fixed day/time.";
+
+    const uniqueTweaks = Array.from(new Set(tweaks)).slice(0, 2);
+    const merged = [...base, ...uniqueTweaks];
+    if (scheduleTweak) merged.push(scheduleTweak);
+
+    return merged.slice(0, 8);
+  }, [r, lb, nextMockInDays]);
 
   if (error) {
     return (
@@ -250,8 +657,7 @@ export default function ReportPage() {
             </Button>
           </div>
           <div className="text-xs text-muted-foreground">
-            Note: reports are stored in-memory right now. If you restarted the dev
-            server, old links can 404.
+            Note: if you restarted dev server, old links can 404.
           </div>
         </Card>
       </main>
@@ -270,15 +676,20 @@ export default function ReportPage() {
             <div className="text-sm text-muted-foreground">
               Exam: <span className="font-medium">{data.exam}</span> •{" "}
               <span className="font-medium">{vibe}</span>
+              {progressLoading ? <span className="ml-2 text-xs">• syncing…</span> : null}
             </div>
           </div>
-          <Button variant="secondary" onClick={() => router.push("/")}>
-            Analyze another
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => router.push("/history")}>
+              Timeline
+            </Button>
+            <Button variant="secondary" onClick={() => router.push("/")}>
+              Analyze another
+            </Button>
+          </div>
         </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="snapshot" className="w-full">
+        <Tabs defaultValue="quest" className="w-full">
           <TabsList className="w-full">
             <TabsTrigger value="snapshot" className="flex-1">
               Snapshot
@@ -287,68 +698,25 @@ export default function ReportPage() {
               Weak Spots
             </TabsTrigger>
             <TabsTrigger value="quest" className="flex-1">
-              14-Day Quest
+              Next Mock Uplift
             </TabsTrigger>
           </TabsList>
 
           {/* SNAPSHOT */}
           <TabsContent value="snapshot" className="space-y-4">
             <Card className="p-5 space-y-3 rounded-2xl">
-              <div className="text-lg font-semibold">Summary (from report)</div>
-              <div className="text-sm">{r.summary}</div>
-
-              {r.estimated_score ? (
-                <div className="pt-2 text-sm text-muted-foreground">
-                  Confidence:{" "}
-                  <Badge variant="secondary">
-                    {r.estimated_score.confidence ?? "unknown"}
-                  </Badge>
-                  {Array.isArray(r.estimated_score.range) &&
-                  r.estimated_score.range.length === 2 ? (
-                    <span className="ml-2">
-                      Range:{" "}
-                      <span className="font-medium">
-                        {r.estimated_score.range[0]}–{r.estimated_score.range[1]}
-                      </span>
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
+              <div className="text-lg font-semibold">Summary</div>
+              <div className="text-sm">{r?.summary}</div>
             </Card>
-
-            <div className="grid md:grid-cols-2 gap-4">
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="font-semibold">Strengths ✅</div>
-                <div className="flex flex-wrap gap-2">
-                  {(r.strengths || []).map((s: string, i: number) => (
-                    <Badge key={i} className="rounded-full">
-                      {s}
-                    </Badge>
-                  ))}
-                </div>
-              </Card>
-
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="font-semibold">Top Actions (AI suggestions)</div>
-                <ul className="list-disc pl-5 text-sm space-y-1">
-                  {(r.top_actions || []).map((a: string, i: number) => (
-                    <li key={i}>{a}</li>
-                  ))}
-                </ul>
-              </Card>
-            </div>
           </TabsContent>
 
           {/* WEAK SPOTS */}
           <TabsContent value="weakspots" className="space-y-4">
             <Card className="p-5 rounded-2xl space-y-3">
               <div className="text-lg font-semibold">Weak Spots 🎯</div>
-              <div className="text-sm text-muted-foreground">
-                These come from the report + light reasoning. No fake certainty.
-              </div>
 
               <div className="space-y-3">
-                {(r.weaknesses || []).map((w: any, i: number) => (
+                {(r?.weaknesses || []).map((w: any, i: number) => (
                   <div key={i} className="rounded-xl border p-4 bg-white">
                     <div className="flex items-center justify-between">
                       <div className="font-medium">{w.topic}</div>
@@ -361,197 +729,229 @@ export default function ReportPage() {
                 ))}
               </div>
             </Card>
-
-            {r.error_types ? (
-              <Card className="p-5 rounded-2xl space-y-4">
-                <div className="text-lg font-semibold">Error Pattern Map 🧠</div>
-
-                {(
-                  ["conceptual", "careless", "time", "comprehension"] as const
-                ).map((k) => (
-                  <div key={k} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="capitalize">{k}</span>
-                      <span className="text-muted-foreground">
-                        {r.error_types[k]}%
-                      </span>
-                    </div>
-                    <Progress value={r.error_types[k]} />
-                  </div>
-                ))}
-              </Card>
-            ) : null}
           </TabsContent>
 
-          {/* QUEST */}
+          {/* QUEST / UPLIFT */}
           <TabsContent value="quest" className="space-y-4">
-            {/* NEW: Learning Behavior (from insights) */}
+            {/* Confidence */}
+            <Card className="p-5 rounded-2xl space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">🎯 Next Mock Confidence</div>
+                  <div className="text-sm text-muted-foreground">
+                    This rises when you complete probes + log results.
+                  </div>
+                </div>
+                <Badge variant="secondary" className="rounded-full">
+                  {confidenceLabel}
+                </Badge>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="text-3xl font-bold">{confidenceScore}</div>
+                <Badge variant="secondary" className="rounded-full">
+                  {doneCount}/{probes.length} probes done
+                </Badge>
+              </div>
+              <Progress value={confidenceScore} />
+              <div className="text-xs text-muted-foreground">
+                Rule: no probes done → score stays low. Completion + accuracy drives it up.
+              </div>
+            </Card>
+
+            {/* Learning behavior (compact) */}
             <Card className="p-5 rounded-2xl space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-lg font-semibold">🧭 Learning Behavior</div>
                   <div className="text-sm text-muted-foreground">
-                    Based on your last few attempts (not your identity).
+                    Behavior signals across your attempts.
                   </div>
                 </div>
-
-                {lb ? (
-                  <Badge variant="secondary" className="rounded-full">
-                    {titleCase(lb.confidence || "unknown")}
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary" className="rounded-full">
-                    Loading…
-                  </Badge>
-                )}
+                <Badge variant="secondary" className="rounded-full">
+                  {titleCase(lb?.confidence || "unknown")}
+                </Badge>
               </div>
 
               {lb ? (
-                <>
-                  <div className="flex flex-wrap gap-2">
-                    {lbChips.map((c, i) => (
-                      <Badge
-                        key={i}
-                        variant={c.variant ?? "secondary"}
-                        className="rounded-full"
-                      >
-                        {c.label}
-                      </Badge>
-                    ))}
-                  </div>
-
-                  <div className="grid sm:grid-cols-3 gap-3 text-sm">
-                    <div className="rounded-xl border bg-white p-3">
-                      <div className="text-xs text-muted-foreground">Streak</div>
-                      <div className="font-semibold">{lb.streak_days ?? 0} days</div>
-                    </div>
-                    <div className="rounded-xl border bg-white p-3">
-                      <div className="text-xs text-muted-foreground">Weekly activity</div>
-                      <div className="font-semibold">
-                        ~{lb.weekly_activity ?? 0} days/week
-                      </div>
-                    </div>
-                    <div className="rounded-xl border bg-white p-3">
-                      <div className="text-xs text-muted-foreground">Δ XP</div>
-                      <div className="font-semibold">
-                        {typeof lb.delta_xp === "number" ? lb.delta_xp : 0}
-                      </div>
-                    </div>
-                  </div>
-
-                  {Array.isArray(lb.evidence) && lb.evidence.length ? (
-                    <div className="text-sm">
-                      <div className="text-xs text-muted-foreground mb-1">
-                        Evidence
-                      </div>
-                      <ul className="list-disc pl-5 space-y-1">
-                        {lb.evidence.slice(0, 4).map((e: string, i: number) => (
-                          <li key={i} className="text-muted-foreground">
-                            {e}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </>
+                <div className="flex flex-wrap gap-2">
+                  {lbChips.map((c, i) => (
+                    <Badge key={i} variant={c.variant ?? "secondary"} className="rounded-full">
+                      {c.label}
+                    </Badge>
+                  ))}
+                </div>
               ) : (
                 <div className="text-sm text-muted-foreground">
-                  No learning behavior signals yet. Analyze a few mocks to unlock this.
+                  Not enough attempts yet. Upload 2–3 mocks to unlock stronger signals.
                 </div>
               )}
             </Card>
 
-            {/* Focus XP */}
-            <Card className="p-5 rounded-2xl space-y-3 bg-gradient-to-r from-purple-500/10 to-indigo-500/10">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-lg font-semibold">🔥 Focus XP</div>
-                  <div className="text-sm text-muted-foreground">
-                    Earned by fixing high-impact weaknesses
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold">{focusXP}</div>
-                  <div className="text-xs text-muted-foreground">XP</div>
-                </div>
-              </div>
-              <Progress value={focusXP} />
-              <div className="text-xs text-muted-foreground">
-                Pro tip: move the highest-severity weakness first = fastest ROI.
-              </div>
-            </Card>
-
-            {/* Avoid These Traps */}
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="text-lg font-semibold">🚫 Avoid These Traps</div>
-              <div className="flex flex-wrap gap-2">
-                {traps.length ? (
-                  traps.map((t, i) => (
-                    <Badge
-                      key={i}
-                      variant="destructive"
-                      className="rounded-full"
-                    >
-                      {t}
-                    </Badge>
-                  ))
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    No trap topics detected. Nice.
-                  </div>
-                )}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                These are the “easy-to-lose marks” zones. Don’t go autopilot here.
-              </div>
-            </Card>
-
-            {/* Daily Streak (no accounts) */}
+            {/* Planner */}
             <Card className="p-5 rounded-2xl space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-lg font-semibold">⚡ Daily Streak</div>
+                  <div className="text-lg font-semibold">📅 Next Mock Planner</div>
                   <div className="text-sm text-muted-foreground">
-                    Tap a dot when you complete at least one task today.
+                    Saved per exam. Adapts your plan automatically.
                   </div>
                 </div>
-                <Button
-                  variant="secondary"
-                  onClick={() => setStreakDone(Array(7).fill(false))}
-                >
-                  Reset
-                </Button>
+                <Badge variant="secondary" className="rounded-full">
+                  {plannedDays}-day runway
+                </Badge>
               </div>
 
-              <div className="flex gap-2">
-                {streakDone.map((done, i) => (
-                  <button
-                    key={i}
-                    onClick={() => toggleStreak(i)}
-                    className={`h-7 w-7 rounded-full transition ${
-                      done ? "bg-indigo-500" : "bg-indigo-500/20"
-                    }`}
-                    title={`Day ${i + 1}`}
-                  />
-                ))}
-              </div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="rounded-xl border bg-white p-3 space-y-2">
+                  <div className="text-xs text-muted-foreground">Next mock in</div>
+                  <div className="flex flex-wrap gap-2">
+                    {[2, 4, 7, 14].map((d) => (
+                      <Button
+                        key={d}
+                        type="button"
+                        variant={nextMockInDays === d ? "default" : "secondary"}
+                        onClick={() => savePlanner({ nextMockInDays: d })}
+                        className="rounded-full"
+                      >
+                        {d} days
+                      </Button>
+                    ))}
+                  </div>
+                </div>
 
-              <div className="text-xs text-muted-foreground">
-                No account needed. This is saved locally in your browser.
+                <div className="rounded-xl border bg-white p-3 space-y-2">
+                  <div className="text-xs text-muted-foreground">Minutes per day</div>
+                  <div className="flex flex-wrap gap-2">
+                    {[20, 40, 60, 90].map((m) => (
+                      <Button
+                        key={m}
+                        type="button"
+                        variant={minutesPerDay === m ? "default" : "secondary"}
+                        onClick={() => savePlanner({ minutesPerDay: m })}
+                        className="rounded-full"
+                      >
+                        {m} min
+                      </Button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </Card>
 
-            {/* Quest intro */}
+            {/* Probes */}
+            <Card className="p-5 rounded-2xl space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">🧪 Probes (Drills)</div>
+                  <div className="text-sm text-muted-foreground">
+                    Complete these to prove improvement before next mock.
+                  </div>
+                </div>
+                <Badge variant="secondary" className="rounded-full">
+                  Saved per exam
+                </Badge>
+              </div>
+
+              <div className="space-y-3">
+                {probes.map((p) => {
+                  const isDone = !!doneMap[p.id];
+                  const met = probeMetrics[p.id] || {};
+                  return (
+                    <div key={p.id} className="rounded-xl border bg-white p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">{p.title}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {titleCase(p.type)} • {p.minutes} min
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant={isDone ? "default" : "secondary"}
+                          onClick={() => toggleProbeDone(p, !isDone)}
+                          className="rounded-full"
+                        >
+                          {isDone ? "Done ✅" : "Mark done"}
+                        </Button>
+                      </div>
+
+                      <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                        {p.instructions.map((t, i) => (
+                          <li key={i}>{t}</li>
+                        ))}
+                      </ul>
+
+                      <div className="grid sm:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Accuracy %</div>
+                          <Input
+                            value={met.accuracy ?? ""}
+                            onChange={(e) =>
+                              setProbeMetric(p.id, {
+                                accuracy:
+                                  e.target.value === ""
+                                    ? undefined
+                                    : Number(e.target.value),
+                              })
+                            }
+                            placeholder="e.g., 70"
+                            inputMode="numeric"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Time (min)</div>
+                          <Input
+                            value={met.time_min ?? ""}
+                            onChange={(e) =>
+                              setProbeMetric(p.id, {
+                                time_min:
+                                  e.target.value === ""
+                                    ? undefined
+                                    : Number(e.target.value),
+                              })
+                            }
+                            placeholder="e.g., 15"
+                            inputMode="numeric"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Self confidence (1–5)</div>
+                          <Input
+                            value={met.self_confidence ?? ""}
+                            onChange={(e) =>
+                              setProbeMetric(p.id, {
+                                self_confidence:
+                                  e.target.value === ""
+                                    ? undefined
+                                    : Number(e.target.value),
+                              })
+                            }
+                            placeholder="e.g., 4"
+                            inputMode="numeric"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            {/* Plan */}
             <Card className="p-5 rounded-2xl space-y-2">
-              <div className="text-lg font-semibold">14-Day Questline 🗺️</div>
+              <div className="text-lg font-semibold">🗺️ Plan until next mock</div>
               <div className="text-sm text-muted-foreground">
-                Small daily wins → compounding confidence.
+                Adapts to your runway and minutes/day.
               </div>
             </Card>
 
             <Card className="p-3 rounded-2xl">
               <Accordion type="single" collapsible className="w-full">
-                {(r.fourteen_day_plan || []).map((d: any) => (
+                {(adjustedPlan || []).map((d: any) => (
                   <AccordionItem key={d.day} value={`day-${d.day}`}>
                     <AccordionTrigger>
                       <div className="flex items-center gap-3">
@@ -574,6 +974,7 @@ export default function ReportPage() {
               </Accordion>
             </Card>
 
+            {/* Strategy */}
             <Card className="p-5 rounded-2xl space-y-2">
               <div className="font-semibold">Next Mock Strategy 🧪</div>
               <ul className="list-disc pl-5 text-sm space-y-1">
@@ -582,6 +983,40 @@ export default function ReportPage() {
                 ))}
               </ul>
             </Card>
+
+            {/* Widgets */}
+            <div className="grid md:grid-cols-2 gap-4">
+              <Card className="p-5 rounded-2xl space-y-3 bg-gradient-to-r from-purple-500/10 to-indigo-500/10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-lg font-semibold">🔥 Focus XP</div>
+                    <div className="text-sm text-muted-foreground">Fast ROI fixes</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold">{focusXP}</div>
+                    <div className="text-xs text-muted-foreground">XP</div>
+                  </div>
+                </div>
+                <Progress value={focusXP} />
+              </Card>
+
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="text-lg font-semibold">🚫 Avoid These Traps</div>
+                <div className="flex flex-wrap gap-2">
+                  {traps.length ? (
+                    traps.map((t, i) => (
+                      <Badge key={i} variant="destructive" className="rounded-full">
+                        {t}
+                      </Badge>
+                    ))
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      No trap topics detected.
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>

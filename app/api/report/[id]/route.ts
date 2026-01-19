@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAttemptById } from "@/lib/persist";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> }
@@ -15,7 +18,6 @@ export async function GET(
 
   return NextResponse.json({
     id: rec._id.toString(),
-    // ✅ Stable serialization for client + python/debugging
     createdAt:
       rec.createdAt instanceof Date ? rec.createdAt.toISOString() : String(rec.createdAt || ""),
     exam: rec.exam,

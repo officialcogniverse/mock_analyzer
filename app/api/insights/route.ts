@@ -3,18 +3,24 @@ import { listAttemptsForInsights } from "@/lib/persist";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function normalizeExam(exam?: string) {
   const x = String(exam || "").trim().toUpperCase();
-  return x === "CAT" || x === "NEET" || x === "JEE" || x === "UPSC" ? x : null;
+  if (x === "" || x === "ALL") return null;
+  return x === "CAT" || x === "NEET" || x === "JEE" ? x : null;
+
 }
 
 export async function GET(req: Request) {
   const session = ensureUserId(req);
+
   try {
     const url = new URL(req.url);
     const exam = normalizeExam(url.searchParams.get("exam") || "");
-    const lastN = Math.min(Number(url.searchParams.get("lastN") || "10"), 30);
+
+    const rawLastN = Number(url.searchParams.get("lastN") || "10");
+    const lastN = Math.max(1, Math.min(30, Number.isFinite(rawLastN) ? rawLastN : 10));
 
     const attempts = await listAttemptsForInsights(session.userId, exam, lastN);
 
@@ -31,6 +37,7 @@ export async function GET(req: Request) {
         attempts,
       }),
       signal: controller.signal,
+      cache: "no-store",
     }).finally(() => clearTimeout(timeout));
 
     const raw = await res.text();

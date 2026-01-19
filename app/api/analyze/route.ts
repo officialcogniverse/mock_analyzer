@@ -19,8 +19,7 @@ const intakeSchema = z
 
 function normalizeExam(exam?: string) {
   const x = String(exam || "").trim().toUpperCase();
-  // ✅ UPDATED: add UPSC
-  return x === "CAT" || x === "NEET" || x === "JEE" || x === "UPSC" ? x : "";
+  return x === "CAT" || x === "NEET" || x === "JEE" ? x : "";
 }
 
 // ✅ helper: compute focusXP consistently
