@@ -20,6 +20,26 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Configuration
+
+Create a `.env.local` file with the following values:
+
+```bash
+# Required
+MONGODB_URI="mongodb://localhost:27017"
+
+# Optional (defaults to "cogniverse")
+MONGODB_DB="cogniverse"
+
+# Optional: use the Python analyzer
+ANALYZER_BACKEND="python"
+PY_ANALYZER_URL="http://127.0.0.1:8000"
+```
+
+The app uses an httpOnly cookie for anonymous sessions, so the API no longer requires a client-supplied `userId`.
+
+If you set `ANALYZER_BACKEND="python"`, ensure the Python service is running at `PY_ANALYZER_URL`.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
