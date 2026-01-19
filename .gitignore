@@ -49,3 +49,21 @@ __pycache__/
 .next/
 dist/
 build/
+cat >> .gitignore <<'EOF'
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# Env files
+.env
+.env.*
+EOF
