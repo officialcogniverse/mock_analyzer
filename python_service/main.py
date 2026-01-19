@@ -2,11 +2,11 @@ import os
 from typing import Any, Dict, List, Literal, Optional
 import json
 import math
-from datetime import datetime
-from fastapi import FastAPI
+from datetime import datetime, timedelta, timezone
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from datetime import timedelta
+import traceback
 
 from openai import OpenAI
 
@@ -16,7 +16,8 @@ app = FastAPI()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-Exam = Literal["CAT", "NEET", "JEE"]
+# ✅ UPDATED: added UPSC for scalability
+Exam = Literal["CAT", "NEET", "JEE", "UPSC"]
 
 
 class Intake(BaseModel):
@@ -70,9 +71,18 @@ def rubric_by_exam(exam: str) -> str:
 - Focus on concept clarity, NCERT alignment, and negative marking.
 - Be conservative with assumptions unless the report states specifics.
 """
-    return """JEE EXAM CONTEXT:
+    if exam == "JEE":
+        return """JEE EXAM CONTEXT:
 - Focus on multi-step reasoning, approach quality, and topic mastery.
 - Avoid guessing section-level weaknesses unless stated.
+"""
+    if exam == "UPSC":
+        return """UPSC EXAM CONTEXT:
+- Focus on breadth + retention, revision cycles, and answer structuring.
+- Be conservative with assumptions unless the report states specifics.
+"""
+    return """GENERAL EXAM CONTEXT:
+- Stay conservative and evidence-based.
 """
 
 
@@ -138,14 +148,10 @@ JSON TEMPLATE (follow this shape):
 """.strip()
 
 
-
 @app.get("/health")
 def health():
     return {"ok": True}
 
-
-from fastapi import HTTPException
-import traceback
 
 @app.post("/analyze")
 def analyze(inp: AnalyzeInput):
@@ -171,13 +177,12 @@ def analyze(inp: AnalyzeInput):
             s = raw.find("{")
             e = raw.rfind("}")
             if s != -1 and e != -1 and e > s:
-                return raw[s:e+1]
+                return raw[s : e + 1]
             return raw
 
         raw = extract_json(call_llm(prompt, temp=0.2))
 
-        # First parse attempt (might still be wrong shape)
-        obj = json.loads(raw)  # will throw if not JSON
+        obj = json.loads(raw)  # throws if not JSON
 
         required = [
             "summary",
@@ -221,9 +226,11 @@ INPUT JSON:
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
 class InsightsInput(BaseModel):
     userId: str
-    exam: str  # "CAT" | "NEET" | "JEE" | "ALL"
+    exam: str  # "CAT" | "NEET" | "JEE" | "UPSC" | "ALL"
     attempts: List[Dict[str, Any]]
 
 
@@ -239,106 +246,44 @@ def _safe_num(x, default=0.0):
 
 
 def _lin_slope(xs: List[float]) -> float:
-    # slope over index 0..n-1 (simple regression)
     n = len(xs)
     if n < 2:
         return 0.0
     x = list(range(n))
-    x_mean = sum(x)/n
-    y_mean = sum(xs)/n
-    num = sum((x[i]-x_mean)*(xs[i]-y_mean) for i in range(n))
-    den = sum((x[i]-x_mean)**2 for i in range(n)) or 1e-9
-    return num/den
+    x_mean = sum(x) / n
+    y_mean = sum(xs) / n
+    num = sum((x[i] - x_mean) * (xs[i] - y_mean) for i in range(n))
+    den = sum((x[i] - x_mean) ** 2 for i in range(n)) or 1e-9
+    return num / den
 
 
 def _std(xs: List[float]) -> float:
     if len(xs) < 2:
         return 0.0
-    m = sum(xs)/len(xs)
-    v = sum((a-m)**2 for a in xs)/(len(xs)-1)
+    m = sum(xs) / len(xs)
+    v = sum((a - m) ** 2 for a in xs) / (len(xs) - 1)
     return math.sqrt(v)
 
 
-def persona_rules(attempts_reports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    # use last 5 reports
-    rs = attempts_reports[:5]
-    if not rs:
-        return []
-
-    doms = []
-    xps = []
-    weak_topics = []
-
-    for r in rs:
-        et = (r.get("error_types") or {})
-        if isinstance(et, dict) and et:
-            dom = max(et.items(), key=lambda kv: _safe_num(kv[1], 0))[0]
-            doms.append(dom)
-        xp = _safe_num(r.get("meta", {}).get("focus_xp", r.get("focusXP", 0)), 0)
-        xps.append(xp)
-
-        ws = r.get("weaknesses") or []
-        if isinstance(ws, list):
-            for w in ws[:2]:
-                t = (w or {}).get("topic")
-                if t:
-                    weak_topics.append(str(t).strip())
-
-    vol = _std(xps)
-    high_vol = vol >= 12  # tune later
-    careless_count = sum(1 for d in doms if d == "careless")
-    time_count = sum(1 for d in doms if d == "time")
-
-    personas = []
-
-    if careless_count >= 2 and high_vol:
-        personas.append({
-            "label": "Fast-but-Careless",
-            "confidence": "high" if careless_count >= 3 else "medium",
-            "evidence": [f"careless dominates {careless_count}/{len(doms)} recent mocks", "high XP volatility"]
-        })
-
-    if time_count >= 2:
-        personas.append({
-            "label": "Conceptually-OK-but-Panics-on-Time",
-            "confidence": "high" if time_count >= 3 else "medium",
-            "evidence": [f"time dominates {time_count}/{len(doms)} recent mocks"]
-        })
-
-    # stuck loop: repeated topics
-    if weak_topics:
-        top = max(set(weak_topics), key=lambda t: weak_topics.count(t))
-        if weak_topics.count(top) >= 3:
-            personas.append({
-                "label": "Stuck-in-Repeat-Loop",
-                "confidence": "medium",
-                "evidence": [f"'{top}' repeats across multiple mocks"]
-            })
-
-    return personas[:2]
-
-
-from datetime import datetime, timezone
-
 def _day_key(dt: datetime) -> str:
     return f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
+
 
 def _parse_dt(x) -> Optional[datetime]:
     if isinstance(x, datetime):
         return x
     if isinstance(x, str):
         try:
-            # handles "2026-01-18T12:34:56.789Z" or without Z
             s = x.replace("Z", "+00:00")
             return datetime.fromisoformat(s)
         except:
             return None
     return None
 
+
 def _streak_days(dates: List[datetime]) -> int:
     if not dates:
         return 0
-    # unique days, sorted desc
     uniq = sorted(set(_day_key(d) for d in dates), reverse=True)
     if not uniq:
         return 0
@@ -349,7 +294,7 @@ def _streak_days(dates: List[datetime]) -> int:
 
     s = 1
     for i in range(1, len(uniq)):
-        prev = _as_date(uniq[i-1])
+        prev = _as_date(uniq[i - 1])
         cur = _as_date(uniq[i])
         diff = (prev - cur).days
         if diff == 1:
@@ -358,8 +303,8 @@ def _streak_days(dates: List[datetime]) -> int:
             break
     return s
 
+
 def _cadence(dates: List[datetime]) -> Dict[str, Any]:
-    # cadence over last 14 days from most recent attempt date
     if not dates:
         return {"cadence": "unknown", "weekly_activity": 0, "streak_days": 0, "evidence": []}
 
@@ -368,10 +313,8 @@ def _cadence(dates: List[datetime]) -> Dict[str, Any]:
     start14 = anchor - timedelta(days=13)
     last14 = [d for d in dates_sorted if d >= start14]
     unique_days14 = sorted(set(_day_key(d) for d in last14))
-    weekly_activity = round(len(unique_days14) / 2, 1)  # active days per week (approx)
+    weekly_activity = round(len(unique_days14) / 2, 1)
 
-    # binge detection: 4+ attempts in <=2 days and then a >=5 day gap somewhere
-    # (simple heuristic)
     counts_by_day = {}
     for d in last14:
         k = _day_key(d)
@@ -380,10 +323,9 @@ def _cadence(dates: List[datetime]) -> Dict[str, Any]:
     max_day_attempts = max(counts_by_day.values()) if counts_by_day else 0
     streak = _streak_days(last14)
 
-    # gaps
     gaps = []
     for i in range(1, len(unique_days14)):
-        a = _parse_dt(unique_days14[i-1] + "T00:00:00+00:00")
+        a = _parse_dt(unique_days14[i - 1] + "T00:00:00+00:00")
         b = _parse_dt(unique_days14[i] + "T00:00:00+00:00")
         if a and b:
             gaps.append((b - a).days)
@@ -400,15 +342,10 @@ def _cadence(dates: List[datetime]) -> Dict[str, Any]:
         cadence = "sporadic"
         evidence.append(f"active on ~{weekly_activity} days/week (last 14d)")
 
-    return {
-        "cadence": cadence,
-        "weekly_activity": weekly_activity,
-        "streak_days": streak,
-        "evidence": evidence,
-    }
+    return {"cadence": cadence, "weekly_activity": weekly_activity, "streak_days": streak, "evidence": evidence}
+
 
 def _responsiveness(xs_chrono: List[float]) -> Dict[str, Any]:
-    # compare last 3 vs previous 3 on XP
     if len(xs_chrono) < 4:
         return {"responsiveness": "unknown", "evidence": ["not enough attempts to judge response trend"]}
 
@@ -417,8 +354,8 @@ def _responsiveness(xs_chrono: List[float]) -> Dict[str, Any]:
     if not b:
         return {"responsiveness": "unknown", "evidence": ["not enough baseline attempts"]}
 
-    mean_a = sum(a)/len(a)
-    mean_b = sum(b)/len(b)
+    mean_a = sum(a) / len(a)
+    mean_b = sum(b) / len(b)
     delta = mean_a - mean_b
 
     if delta >= 5:
@@ -434,8 +371,8 @@ def _responsiveness(xs_chrono: List[float]) -> Dict[str, Any]:
         "evidence": [f"recent avg XP {round(mean_a,1)} vs prior {round(mean_b,1)} (Δ {round(delta,1)})"],
     }
 
+
 def _stuck_loop(reports_chrono: List[Dict[str, Any]]) -> Dict[str, Any]:
-    # look at weaknesses topics in last 6 reports
     if not reports_chrono:
         return {"active": False}
 
@@ -453,14 +390,13 @@ def _stuck_loop(reports_chrono: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not topics:
         return {"active": False}
 
-    # count topic frequency
     from collections import Counter
-    c = Counter([t for t,_ in topics])
+
+    c = Counter([t for t, _ in topics])
     top_topic, top_n = c.most_common(1)[0]
 
-    # avg severity for this topic if available
-    sevs = [s for t,s in topics if t == top_topic and isinstance(s, int)]
-    avg_sev = round(sum(sevs)/len(sevs), 2) if sevs else None
+    sevs = [s for t, s in topics if t == top_topic and isinstance(s, int)]
+    avg_sev = round(sum(sevs) / len(sevs), 2) if sevs else None
 
     active = (top_n >= 3) and (avg_sev is None or avg_sev >= 3)
 
@@ -472,8 +408,8 @@ def _stuck_loop(reports_chrono: List[Dict[str, Any]]) -> Dict[str, Any]:
         "evidence": [f"'{top_topic.title()}' repeats {top_n}x in last {len(rs)} mocks"],
     }
 
+
 def _execution_style(dom_errors_recent: List[str], volatility: int) -> Dict[str, Any]:
-    # very interpretable v1 rules
     if not dom_errors_recent:
         return {"execution_style": "unknown", "evidence": []}
 
@@ -485,24 +421,100 @@ def _execution_style(dom_errors_recent: List[str], volatility: int) -> Dict[str,
     if time_n >= 3:
         return {"execution_style": "panic_cycle", "evidence": [f"time dominates {time_n}/5 recent mocks"]}
     if careless_n >= 3 and volatility >= 50:
-        return {"execution_style": "speed_over_control", "evidence": [f"careless dominates {careless_n}/5 + high volatility"]}
+        return {
+            "execution_style": "speed_over_control",
+            "evidence": [f"careless dominates {careless_n}/5 + high volatility"],
+        }
     if conceptual_n >= 3 and volatility < 35:
-        return {"execution_style": "control_over_speed", "evidence": [f"conceptual dominates {conceptual_n}/5 + stable performance"]}
+        return {
+            "execution_style": "control_over_speed",
+            "evidence": [f"conceptual dominates {conceptual_n}/5 + stable performance"],
+        }
     return {"execution_style": "balanced", "evidence": ["no single failure mode dominates consistently"]}
+
+
+# ✅ UPDATED: persona_rules now computes XP consistently (no more zeros)
+def persona_rules(attempts_reports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rs = attempts_reports[:5]
+    if not rs:
+        return []
+
+    doms = []
+    xps = []
+    weak_topics = []
+
+    for r in rs:
+        et = (r.get("error_types") or {})
+        if isinstance(et, dict) and et:
+            dom = max(et.items(), key=lambda kv: _safe_num(kv[1], 0))[0]
+            doms.append(dom)
+
+        xp = r.get("focusXP")
+        if xp is None:
+            xp = 100 - _safe_num(et.get("time", 0), 0)
+        xp = _clamp(_safe_num(xp, 0), 0, 100)
+        xps.append(xp)
+
+        ws = r.get("weaknesses") or []
+        if isinstance(ws, list):
+            for w in ws[:2]:
+                t = (w or {}).get("topic")
+                if t:
+                    weak_topics.append(str(t).strip())
+
+    vol = _std(xps)
+    high_vol = vol >= 12
+    careless_count = sum(1 for d in doms if d == "careless")
+    time_count = sum(1 for d in doms if d == "time")
+
+    personas = []
+
+    if careless_count >= 2 and high_vol:
+        personas.append(
+            {
+                "label": "Fast-but-Careless",
+                "confidence": "high" if careless_count >= 3 else "medium",
+                "evidence": [
+                    f"careless dominates {careless_count}/{len(doms)} recent mocks",
+                    "high XP volatility",
+                ],
+            }
+        )
+
+    if time_count >= 2:
+        personas.append(
+            {
+                "label": "Conceptually-OK-but-Panics-on-Time",
+                "confidence": "high" if time_count >= 3 else "medium",
+                "evidence": [f"time dominates {time_count}/{len(doms)} recent mocks"],
+            }
+        )
+
+    if weak_topics:
+        top = max(set(weak_topics), key=lambda t: weak_topics.count(t))
+        if weak_topics.count(top) >= 3:
+            personas.append(
+                {
+                    "label": "Stuck-in-Repeat-Loop",
+                    "confidence": "medium",
+                    "evidence": [f"'{top}' repeats across multiple mocks"],
+                }
+            )
+
+    return personas[:2]
+
 
 @app.post("/insights")
 def insights(inp: InsightsInput):
     try:
         attempts = inp.attempts or []
 
-        # keep original structures
         reports = []
         xps = []
         dom_errors = []
         dates = []
 
         for a in attempts:
-            # createdAt can be Date or string depending on driver serialization
             dt = _parse_dt(a.get("createdAt"))
             if dt:
                 dates.append(dt)
@@ -544,7 +556,6 @@ def insights(inp: InsightsInput):
                 },
             }
 
-        # chronological lists (oldest -> newest)
         xs_chrono = list(reversed(xps))
         reports_chrono = list(reversed(reports))
 
@@ -566,10 +577,9 @@ def insights(inp: InsightsInput):
         else:
             consistency = "low"
 
-        if dom_errors:
-            dominant_error = max(set(dom_errors), key=lambda k: dom_errors.count(k))
-        else:
-            dominant_error = "unknown"
+        dominant_error = (
+            max(set(dom_errors), key=lambda k: dom_errors.count(k)) if dom_errors else "unknown"
+        )
 
         risk_zone = "none"
         recent_dom = dom_errors[:3]
@@ -582,20 +592,13 @@ def insights(inp: InsightsInput):
 
         personas = persona_rules(reports)
 
-        # ---- learning behavior signals (NEW)
         cadence_pack = _cadence(dates)
         resp_pack = _responsiveness(xs_chrono)
         loop_pack = _stuck_loop(reports_chrono)
         exec_pack = _execution_style(dom_errors, volatility)
 
-        # confidence heuristic: more attempts => higher confidence
         n = len(xs_chrono)
-        if n >= 8:
-            conf = "high"
-        elif n >= 4:
-            conf = "medium"
-        else:
-            conf = "low"
+        conf = "high" if n >= 8 else ("medium" if n >= 4 else "low")
 
         evidence = []
         evidence += cadence_pack.get("evidence", [])
@@ -613,7 +616,7 @@ def insights(inp: InsightsInput):
             "stuck_loop": loop_pack,
             "execution_style": exec_pack.get("execution_style", "unknown"),
             "confidence": conf,
-            "evidence": evidence[:6],  # keep it short for UI
+            "evidence": evidence[:6],
         }
 
         return {

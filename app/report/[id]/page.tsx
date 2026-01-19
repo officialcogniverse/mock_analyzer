@@ -23,12 +23,26 @@ type ApiOk = {
 
 type ApiErr = { error: string };
 
+function titleCase(x: string) {
+  const s = String(x || "").trim();
+  if (!s) return "";
+  return s
+    .split("_")
+    .join(" ")
+    .split(" ")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ""))
+    .join(" ");
+}
+
 export default function ReportPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
   const [data, setData] = useState<ApiOk | null>(null);
   const [error, setError] = useState<string>("");
+
+  // insights fetched per exam (includes learning_behavior)
+  const [insights, setInsights] = useState<any | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -57,6 +71,30 @@ export default function ReportPage() {
     })();
   }, [id]);
 
+  // fetch insights when exam is known
+  useEffect(() => {
+    if (!data?.exam) return;
+    let active = true;
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/insights?exam=${encodeURIComponent(data.exam)}&lastN=10`
+        );
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!active) return;
+        setInsights(json);
+      } catch {
+        // ignore insights errors; report still renders fine
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [data?.exam]);
+
   const r = data?.report;
 
   const vibe = useMemo(() => {
@@ -66,7 +104,7 @@ export default function ReportPage() {
     return "🌱 Building momentum";
   }, [r]);
 
-  // 🔥 Focus XP derived from weaknesses severity (simple + fun)
+  // Focus XP derived from weaknesses severity (simple + fun)
   const focusXP = useMemo(() => {
     const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
     const raw = weaknesses.reduce(
@@ -76,7 +114,7 @@ export default function ReportPage() {
     return Math.min(100, Math.max(0, raw));
   }, [r]);
 
-  // 🚫 Trap chips derived from weakness topics
+  // Trap chips derived from weakness topics
   const traps = useMemo(() => {
     const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
     return weaknesses
@@ -85,7 +123,92 @@ export default function ReportPage() {
       .slice(0, 8);
   }, [r]);
 
-  // ⚡ Daily streak UI only (no accounts); optional: save locally
+  // Next mock strategy with learning_behavior tweaks appended (if available)
+  const nextMockStrategy = useMemo(() => {
+    const base = Array.isArray(r?.next_mock_strategy)
+      ? r.next_mock_strategy
+      : [];
+
+    const lb = insights?.learning_behavior;
+    if (!lb) return base;
+
+    const tweaks: string[] = [];
+    const cadence = String(lb.cadence || "");
+    const executionStyle = String(lb.execution_style || "");
+    const responsiveness = String(lb.responsiveness || "");
+    const stuckLoop = lb?.stuck_loop || {};
+
+    if (cadence === "sporadic") {
+      tweaks.push(
+        "Cadence has been sporadic—lock the next mock to a fixed day/time and protect that slot."
+      );
+    } else if (cadence === "binge") {
+      tweaks.push(
+        "Avoid binge cycles—space mocks 2–3 days apart so fixes have time to stick."
+      );
+    }
+
+    if (executionStyle === "panic_cycle") {
+      tweaks.push(
+        "Start the mock slower: build accuracy in the first 20% and add time checkpoints per section."
+      );
+    } else if (executionStyle === "speed_over_control") {
+      tweaks.push(
+        "Add accuracy checkpoints: cap guesses and mark 2–3 questions to return to after the sweep."
+      );
+    } else if (executionStyle === "control_over_speed") {
+      tweaks.push("Inject 1–2 timed sprints to raise pace without losing method.");
+    }
+
+    if (stuckLoop?.active && stuckLoop?.topic) {
+      tweaks.push(
+        `Break the loop on ${stuckLoop.topic}: drill it before the next mock, then re-test it early.`
+      );
+    }
+
+    if (responsiveness === "declining") {
+      tweaks.push(
+        "Your last few mocks dipped—do a micro-fix session before taking the next full mock."
+      );
+    }
+
+    // Keep it tight: max 2 unique tweaks
+    const uniqueTweaks = Array.from(new Set(tweaks)).slice(0, 2);
+    return [...base, ...uniqueTweaks];
+  }, [insights, r]);
+
+  // Learning behavior display (safe)
+  const lb = insights?.learning_behavior || null;
+
+  const lbChips = useMemo(() => {
+    if (!lb) return [];
+    const chips: { label: string; variant?: "secondary" | "destructive" }[] = [];
+
+    if (lb.cadence && lb.cadence !== "unknown") {
+      chips.push({ label: `Cadence: ${titleCase(lb.cadence)}`, variant: "secondary" });
+    }
+    if (lb.execution_style && lb.execution_style !== "unknown") {
+      chips.push({
+        label: `Execution: ${titleCase(lb.execution_style)}`,
+        variant: lb.execution_style === "panic_cycle" ? "destructive" : "secondary",
+      });
+    }
+    if (lb.responsiveness && lb.responsiveness !== "unknown") {
+      chips.push({
+        label: `Response: ${titleCase(lb.responsiveness)}`,
+        variant: lb.responsiveness === "declining" ? "destructive" : "secondary",
+      });
+    }
+    if (lb?.stuck_loop?.active && lb?.stuck_loop?.topic) {
+      chips.push({ label: `Stuck loop: ${lb.stuck_loop.topic}`, variant: "destructive" });
+    }
+    if (lb.confidence) {
+      chips.push({ label: `Confidence: ${titleCase(lb.confidence)}`, variant: "secondary" });
+    }
+    return chips.slice(0, 6);
+  }, [lb]);
+
+  // Daily streak UI only (no accounts); optional: save locally
   const [streakDone, setStreakDone] = useState<boolean[]>(() => {
     if (typeof window === "undefined") return Array(7).fill(false);
     try {
@@ -262,7 +385,83 @@ export default function ReportPage() {
 
           {/* QUEST */}
           <TabsContent value="quest" className="space-y-4">
-            {/* NEW: Focus XP */}
+            {/* NEW: Learning Behavior (from insights) */}
+            <Card className="p-5 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-lg font-semibold">🧭 Learning Behavior</div>
+                  <div className="text-sm text-muted-foreground">
+                    Based on your last few attempts (not your identity).
+                  </div>
+                </div>
+
+                {lb ? (
+                  <Badge variant="secondary" className="rounded-full">
+                    {titleCase(lb.confidence || "unknown")}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="rounded-full">
+                    Loading…
+                  </Badge>
+                )}
+              </div>
+
+              {lb ? (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {lbChips.map((c, i) => (
+                      <Badge
+                        key={i}
+                        variant={c.variant ?? "secondary"}
+                        className="rounded-full"
+                      >
+                        {c.label}
+                      </Badge>
+                    ))}
+                  </div>
+
+                  <div className="grid sm:grid-cols-3 gap-3 text-sm">
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Streak</div>
+                      <div className="font-semibold">{lb.streak_days ?? 0} days</div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Weekly activity</div>
+                      <div className="font-semibold">
+                        ~{lb.weekly_activity ?? 0} days/week
+                      </div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Δ XP</div>
+                      <div className="font-semibold">
+                        {typeof lb.delta_xp === "number" ? lb.delta_xp : 0}
+                      </div>
+                    </div>
+                  </div>
+
+                  {Array.isArray(lb.evidence) && lb.evidence.length ? (
+                    <div className="text-sm">
+                      <div className="text-xs text-muted-foreground mb-1">
+                        Evidence
+                      </div>
+                      <ul className="list-disc pl-5 space-y-1">
+                        {lb.evidence.slice(0, 4).map((e: string, i: number) => (
+                          <li key={i} className="text-muted-foreground">
+                            {e}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  No learning behavior signals yet. Analyze a few mocks to unlock this.
+                </div>
+              )}
+            </Card>
+
+            {/* Focus XP */}
             <Card className="p-5 rounded-2xl space-y-3 bg-gradient-to-r from-purple-500/10 to-indigo-500/10">
               <div className="flex items-center justify-between">
                 <div>
@@ -282,7 +481,7 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* NEW: Avoid These Traps */}
+            {/* Avoid These Traps */}
             <Card className="p-5 rounded-2xl space-y-3">
               <div className="text-lg font-semibold">🚫 Avoid These Traps</div>
               <div className="flex flex-wrap gap-2">
@@ -307,7 +506,7 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* NEW: Daily Streak (no accounts) */}
+            {/* Daily Streak (no accounts) */}
             <Card className="p-5 rounded-2xl space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -342,7 +541,7 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* Existing Quest intro */}
+            {/* Quest intro */}
             <Card className="p-5 rounded-2xl space-y-2">
               <div className="text-lg font-semibold">14-Day Questline 🗺️</div>
               <div className="text-sm text-muted-foreground">
@@ -378,7 +577,7 @@ export default function ReportPage() {
             <Card className="p-5 rounded-2xl space-y-2">
               <div className="font-semibold">Next Mock Strategy 🧪</div>
               <ul className="list-disc pl-5 text-sm space-y-1">
-                {(r.next_mock_strategy || []).map((a: string, i: number) => (
+                {nextMockStrategy.map((a: string, i: number) => (
                   <li key={i}>{a}</li>
                 ))}
               </ul>

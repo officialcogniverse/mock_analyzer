@@ -19,7 +19,26 @@ const intakeSchema = z
 
 function normalizeExam(exam?: string) {
   const x = String(exam || "").trim().toUpperCase();
-  return x === "CAT" || x === "NEET" || x === "JEE" ? x : "";
+  // ✅ UPDATED: add UPSC
+  return x === "CAT" || x === "NEET" || x === "JEE" || x === "UPSC" ? x : "";
+}
+
+// ✅ helper: compute focusXP consistently
+function computeFocusXP(reportObj: any) {
+  const weaknesses = Array.isArray(reportObj?.weaknesses) ? reportObj.weaknesses : [];
+  const raw = weaknesses.reduce(
+    (sum: number, w: any) => sum + (Number(w?.severity) || 0) * 10,
+    0
+  );
+  return Math.min(100, Math.max(0, raw));
+}
+
+// ✅ helper: unwrap python response if it returns { report: {...} }
+function unwrapReport(maybe: any) {
+  if (maybe && typeof maybe === "object" && maybe.report && typeof maybe.report === "object") {
+    return maybe.report;
+  }
+  return maybe;
 }
 
 export const runtime = "nodejs";
@@ -137,10 +156,20 @@ export async function POST(req: Request) {
 
     const usePython = process.env.ANALYZER_BACKEND === "python";
 
-    const report = usePython
+    const rawOut = usePython
       ? await analyzeViaPython({ exam, intake, text })
       : await analyzeMock({ exam, intake, text });
 
+    // ✅ normalize the shape to always be the report object
+    const report = unwrapReport(rawOut);
+
+    // ✅ enrich meta (safe, doesn’t affect UI if unused)
+    const focusXP = computeFocusXP(report);
+    report.meta = report.meta || {};
+    report.meta.focusXP = focusXP;
+    report.meta.userExam = exam;
+    report.meta.generatedAt = new Date().toISOString();
+    report.meta.analyzer_backend = usePython ? "python" : "ts";
 
     // ✅ save attempt to Mongo
     const attemptId = await saveAttempt({

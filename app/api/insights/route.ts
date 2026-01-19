@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 
 function normalizeExam(exam?: string) {
   const x = String(exam || "").trim().toUpperCase();
-  return x === "CAT" || x === "NEET" || x === "JEE" ? x : null;
+  return x === "CAT" || x === "NEET" || x === "JEE" || x === "UPSC" ? x : null;
 }
 
 export async function GET(req: Request) {

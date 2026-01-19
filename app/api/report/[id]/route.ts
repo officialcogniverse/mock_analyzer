@@ -15,7 +15,9 @@ export async function GET(
 
   return NextResponse.json({
     id: rec._id.toString(),
-    createdAt: rec.createdAt,
+    // ✅ Stable serialization for client + python/debugging
+    createdAt:
+      rec.createdAt instanceof Date ? rec.createdAt.toISOString() : String(rec.createdAt || ""),
     exam: rec.exam,
     report: rec.report,
   });

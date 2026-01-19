@@ -49,13 +49,15 @@ export async function saveAttempt(params: {
   const db = await getDb();
   const attempts = db.collection<any>("mock_attempts");
 
+  const createdAt = new Date();
+
   const doc = {
     userId: params.userId,
-    exam: params.exam,
+    exam: String(params.exam || "").toUpperCase(), // normalize
     intake: params.intake,
     rawText: params.rawText,
     report: params.report,
-    createdAt: new Date(),
+    createdAt,
   };
 
   const res = await attempts.insertOne(doc);
@@ -99,12 +101,21 @@ export async function listAttempts(userId: string, limit = 20) {
     ),
   }));
 }
-export async function listAttemptsForInsights(userId: string, exam?: string | null, limit = 20) {
+
+/**
+ * List attempts for insights (keep payload small + stable for python)
+ * IMPORTANT: return createdAt as ISO string so python cadence/streak is reliable.
+ */
+export async function listAttemptsForInsights(
+  userId: string,
+  exam?: string | null,
+  limit = 20
+) {
   const db = await getDb();
   const attempts = db.collection<any>("mock_attempts");
 
   const q: any = { userId };
-  if (exam) q.exam = exam;
+  if (exam) q.exam = String(exam).toUpperCase();
 
   const rows = await attempts
     .find(q)
@@ -115,7 +126,9 @@ export async function listAttemptsForInsights(userId: string, exam?: string | nu
 
   return rows.map((r) => ({
     id: r._id.toString(),
-    createdAt: r.createdAt,
+    // ✅ Stable serialization:
+    createdAt:
+      r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt || ""),
     exam: r.exam,
     report: r.report,
   }));
