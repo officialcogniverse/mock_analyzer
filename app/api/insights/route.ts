@@ -1,16 +1,10 @@
 import { NextResponse } from "next/server";
 import { listAttemptsForInsights } from "@/lib/persist";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
+import { normalizeExam } from "@/lib/exams";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function normalizeExam(exam?: string) {
-  const x = String(exam || "").trim().toUpperCase();
-  if (x === "" || x === "ALL") return null;
-  return x === "CAT" || x === "NEET" || x === "JEE" ? x : null;
-
-}
 
 export async function GET(req: Request) {
   const session = ensureUserId(req);

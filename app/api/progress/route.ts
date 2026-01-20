@@ -8,10 +8,11 @@ import {
   type Probe,
 } from "@/lib/persist";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
+import { EXAMS } from "@/lib/exams";
 
 export const runtime = "nodejs";
 
-const examSchema = z.enum(["CAT", "NEET", "JEE"]);
+const examSchema = z.enum(EXAMS);
 
 const probeSchema = z.object({
   id: z.string().min(1),
@@ -54,7 +55,7 @@ export async function GET(req: Request) {
 
   if (!parsed.success) {
     const res = NextResponse.json(
-      { error: "Missing/invalid exam. Use ?exam=CAT|NEET|JEE" },
+      { error: `Missing/invalid exam. Use ?exam=${EXAMS.join("|")}` },
       { status: 400 }
     );
     if (session.isNew) attachUserIdCookie(res, session.userId);

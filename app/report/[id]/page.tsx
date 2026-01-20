@@ -1252,14 +1252,16 @@ export default function ReportPage() {
             </Card>
 
             {/* Next mock strategy (existing + behavior tweaks) */}
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="text-lg font-semibold">📌 Next Mock Strategy</div>
-              <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                {nextMockStrategy.map((s: string, i: number) => (
-                  <li key={i}>{s}</li>
-                ))}
-              </ul>
-            </Card>
+            {!strategyPlan ? (
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="text-lg font-semibold">📌 Next Mock Strategy</div>
+                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                  {nextMockStrategy.map((s: string, i: number) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </Card>
+            ) : null}
 
             {/* Study plan */}
             <Card className="p-5 rounded-2xl space-y-3">
@@ -1304,4 +1306,3 @@ export default function ReportPage() {
     </main>
   );
 }
-

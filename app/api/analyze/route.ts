@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { analyzeMock } from "@/lib/analyzer";
 import { extractTextFromPdf } from "@/lib/extractText";
 import { detectExamFromText } from "@/lib/examDetect";
+import { normalizeExam } from "@/lib/exams";
 import type { Exam, Intake } from "@/lib/types";
 import { upsertUser, saveAttempt, saveStrategyMemorySnapshot } from "@/lib/persist";
 import { analyzeViaPython } from "@/lib/pythonClient";
@@ -27,11 +28,6 @@ const intakeSchema = z
     chaotic_section: z.string().optional(),
   })
   .strict();
-
-function normalizeExam(exam?: string) {
-  const x = String(exam || "").trim().toUpperCase();
-  return x === "CAT" || x === "NEET" || x === "JEE" ? x : "";
-}
 
 // ✅ helper: compute focusXP consistently
 function computeFocusXP(reportObj: any) {
@@ -237,7 +233,7 @@ export async function POST(req: Request) {
   try {
     const contentType = req.headers.get("content-type") || "";
 
-    let exam: Exam;
+    let exam: Exam | null = null;
     let intake: Intake;
     let text = "";
 
@@ -246,7 +242,7 @@ export async function POST(req: Request) {
 
       const examRaw = String(form.get("exam") || "");
       const normalizedExam = normalizeExam(examRaw);
-      exam = normalizedExam as Exam;
+      exam = normalizedExam;
 
       const intakeRaw = JSON.parse(String(form.get("intake") || "{}"));
       const parsedIntake = intakeSchema.safeParse(intakeRaw);
@@ -294,7 +290,7 @@ export async function POST(req: Request) {
     } else {
       const body = await req.json();
       const normalizedExam = normalizeExam(body.exam);
-      exam = normalizedExam as Exam;
+      exam = normalizedExam;
 
       const parsedIntake = intakeSchema.safeParse(body.intake);
       if (!parsedIntake.success) {

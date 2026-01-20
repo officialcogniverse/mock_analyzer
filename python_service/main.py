@@ -16,8 +16,7 @@ load_dotenv()
 app = FastAPI()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ✅ UPDATED: added UPSC for scalability
-Exam = Literal["CAT", "NEET", "JEE", "UPSC"]
+Exam = Literal["CAT", "NEET", "JEE"]
 
 
 # -----------------------------
@@ -508,6 +507,7 @@ def _normalize_strategy_obj(obj: Dict[str, Any]) -> Dict[str, Any]:
         levers = []
 
     fixed_levers = []
+    fallback_used = False
     seen_themes = set()
 
     for lv in levers:
@@ -555,10 +555,10 @@ def _normalize_strategy_obj(obj: Dict[str, Any]) -> Dict[str, Any]:
                 "next_mock_rule": "Timer > ego in final stretch",
             },
         ]
-        obj["_is_fallback"] = True
+        fallback_used = True
 
     # mark fallback explicitly
-    obj["_is_fallback"] = False
+    obj["_is_fallback"] = fallback_used
     obj["top_levers"] = fixed_levers
 
 
@@ -611,6 +611,7 @@ def _normalize_strategy_obj(obj: Dict[str, Any]) -> Dict[str, Any]:
 
 def generate_strategy_plan_best_effort(exam: str, intake: Dict[str, Any], report_dict: Dict[str, Any]) -> Dict[str, Any]:
     strategy_model = os.getenv("OPENAI_STRATEGY_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    strategy_debug = os.getenv("STRATEGY_DEBUG") == "1"
 
     base_user = _build_strategy_user_content(exam, intake, report_dict)
 
@@ -627,18 +628,19 @@ def generate_strategy_plan_best_effort(exam: str, intake: Dict[str, Any], report
 
         obj = json.loads(_extract_json(raw))
 
-        print("---- STRATEGY RAW JSON (parsed) ----")
-        print(json.dumps(obj, ensure_ascii=False, indent=2)[:4000])
-        print("-----------------------------------")
+        if strategy_debug:
+            print("---- STRATEGY RAW JSON (parsed) ----")
+            print(json.dumps(obj, ensure_ascii=False, indent=2)[:4000])
+            print("-----------------------------------")
 
         normalized = _normalize_strategy_obj(obj)
         is_fallback = bool(normalized.get("_is_fallback"))
 
-        print("---- STRATEGY NORMALIZED JSON ----")
-        print(json.dumps(normalized, ensure_ascii=False, indent=2)[:4000])
-        print("---------------------------------")
-
-        print("DEBUG normalized confidence:", (normalized.get("confidence") or {}))
+        if strategy_debug:
+            print("---- STRATEGY NORMALIZED JSON ----")
+            print(json.dumps(normalized, ensure_ascii=False, indent=2)[:4000])
+            print("---------------------------------")
+            print("DEBUG normalized confidence:", (normalized.get("confidence") or {}))
 
         plan = StrategyPlan.model_validate(normalized)
         return plan, is_fallback

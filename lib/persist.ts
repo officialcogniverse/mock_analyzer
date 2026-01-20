@@ -1,13 +1,12 @@
-import { getDb } from "./mongo";
 import { ObjectId } from "mongodb";
+import { type Exam, normalizeExam } from "./exams";
+import { getDb } from "./mongo";
 
 export type CoachPersona = {
   coach_name: string;
   tone: "calm" | "tough_love" | "hype";
   style: "bullets" | "story" | "roast_light";
 };
-
-export type ProgressExam = "CAT" | "NEET" | "JEE";
 
 export type Probe = {
   id: string; // stable id (e.g. "drill_accuracy_20q")
@@ -23,7 +22,7 @@ export type Probe = {
 export type UserProgressDoc = {
   _id?: any;
   userId: string;
-  exam: ProgressExam;
+  exam: Exam;
   nextMockInDays?: number; // 2|4|7|14
   minutesPerDay?: number; // 20|40|60|90
   probes?: Probe[];
@@ -35,7 +34,7 @@ export type UserProgressDoc = {
 export type StrategyMemoryDoc = {
   _id?: any;
   userId: string;
-  exam: string; // "CAT" | "NEET" | "JEE" | "UPSC"
+  exam: string; // "CAT" | "NEET" | "JEE"
   attemptId: string; // mock_attempts._id as string
   lever_titles: string[];
   if_then_rules: string[];
@@ -45,12 +44,6 @@ export type StrategyMemoryDoc = {
   createdAt: Date;
 };
 
-
-function normalizeExam(exam: any): ProgressExam | null {
-  const x = String(exam || "").trim().toUpperCase();
-  if (x === "CAT" || x === "NEET" || x === "JEE") return x;
-  return null;
-}
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
