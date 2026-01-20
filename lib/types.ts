@@ -1,4 +1,4 @@
-export type Exam = "CAT" | "NEET" | "JEE";
+export type { Exam } from "./exams";
 
 /**
  * Core intake (always asked)

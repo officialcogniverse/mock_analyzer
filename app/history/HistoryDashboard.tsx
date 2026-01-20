@@ -15,9 +15,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { EXAMS, isExam, type Exam } from "@/lib/exams";
 import { ensureSession } from "@/lib/userClient";
-
-type Exam = "CAT" | "NEET" | "JEE";
 type ExamFilter = "ALL" | Exam;
 
 type HistoryItem = {
@@ -104,10 +103,6 @@ function confLabel(v: number) {
   if (v >= 60) return "Medium";
   if (v >= 40) return "Building";
   return "Low";
-}
-
-function isExam(x: any): x is Exam {
-  return x === "CAT" || x === "NEET" || x === "JEE";
 }
 
 export default function HistoryDashboard() {
@@ -466,7 +461,7 @@ export default function HistoryDashboard() {
 
         {/* Filters */}
         <div className="flex flex-wrap gap-2">
-          {(["ALL", "CAT", "NEET", "JEE"] as const).map((x) => (
+          {(["ALL", ...EXAMS] as const).map((x) => (
             <Button
               key={x}
               type="button"

@@ -7,10 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import { EXAMS, type Exam } from "@/lib/exams";
 import { ensureSession } from "@/lib/userClient";
 import { Upload, Target, Clock, Brain, FileText } from "lucide-react";
-
-type Exam = "CAT" | "NEET" | "JEE";
 
 // UI-level goal choices (what user clicks)
 type GoalUI = "percentile" | "accuracy" | "speed" | "weak_topics";
@@ -199,24 +198,15 @@ export default function LandingPage() {
                 <Target className="w-5 h-5" /> Choose your exam
               </h2>
               <div className="grid grid-cols-3 gap-4">
-                <Button
-                  variant={choiceBtn(exam === "CAT")}
-                  onClick={() => setExam("CAT")}
-                >
-                  CAT
-                </Button>
-                <Button
-                  variant={choiceBtn(exam === "NEET")}
-                  onClick={() => setExam("NEET")}
-                >
-                  NEET
-                </Button>
-                <Button
-                  variant={choiceBtn(exam === "JEE")}
-                  onClick={() => setExam("JEE")}
-                >
-                  JEE
-                </Button>
+                {EXAMS.map((item) => (
+                  <Button
+                    key={item}
+                    variant={choiceBtn(exam === item)}
+                    onClick={() => setExam(item)}
+                  >
+                    {item}
+                  </Button>
+                ))}
               </div>
             </div>
           )}

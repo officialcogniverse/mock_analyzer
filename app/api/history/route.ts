@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
+import { EXAMS, normalizeExam, type Exam } from "@/lib/exams";
 import { listAttempts, upsertUser } from "@/lib/persist";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
 
 export const runtime = "nodejs";
 
-type ExamKey = "CAT" | "NEET" | "JEE" | "UPSC";
-
-function normalizeExam(exam?: string): ExamKey | null {
-  const x = String(exam || "").trim().toUpperCase();
-  return x === "CAT" || x === "NEET" || x === "JEE" || x === "UPSC" ? (x as ExamKey) : null;
-}
+type ExamKey = Exam;
 
 export async function GET(req: Request) {
   const session = ensureUserId(req);
@@ -24,9 +20,9 @@ export async function GET(req: Request) {
     // listAttempts returns all exams; filter here (v1)
     const rows = await listAttempts(session.userId, limit);
     const rows3 = rows.filter((x: any) =>
-      ["CAT", "NEET", "JEE"].includes(String(x.exam || "").toUpperCase())
+      EXAMS.includes(String(x.exam || "").toUpperCase() as Exam)
     );
-    
+
 
     const items = exam
       ? rows.filter((x: any) => String(x.exam || "").toUpperCase() === exam)
