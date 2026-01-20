@@ -40,6 +40,21 @@ The app uses an httpOnly cookie for anonymous sessions, so the API no longer req
 
 If you set `ANALYZER_BACKEND="python"`, ensure the Python service is running at `PY_ANALYZER_URL`.
 
+## Code Map (for architecture work)
+
+For a system-level view of the services, data flows, and storage model, see [`CODEMAP.md`](./CODEMAP.md).
+
+## Product roadmap ideas
+
+The following feature ideas are prioritized for impact and data leverage:
+
+1. **User accounts + data portability**: allow login (email/OTP) so users keep history across devices; add export to CSV/JSON for coaching use.
+2. **Exam-specific schema enforcement**: tighten input normalization (CAT/NEET/JEE) with per-exam section schema, enabling richer analytics and fewer assumptions.
+3. **Personalized drill recommendations**: map weaknesses → curated practice sets; track outcomes to refine strategy recommendations.
+4. **Adaptive timing coach**: collect per-section timing data (manual or OCR) to generate pacing rules and section order guidance.
+5. **Cohort insights dashboard**: aggregate anonymized trends to show percentile benchmarks, common mistakes, and progress velocity.
+6. **Scheduled nudge + plan adherence**: reminders for daily plan tasks, streaks, and mock prep countdown to reduce drop-off.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
