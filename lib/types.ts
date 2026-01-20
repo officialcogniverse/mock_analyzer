@@ -1,14 +1,50 @@
 export type Exam = "CAT" | "NEET" | "JEE";
 
+/**
+ * Core intake (always asked)
+ */
 export type Intake = {
   goal: "score" | "accuracy" | "speed" | "concepts";
   hardest: "selection" | "time" | "concepts" | "careless" | "anxiety";
   weekly_hours: "<10" | "10-20" | "20-35" | "35+";
   section?: string;
+
+  /**
+   * ===== Adaptive boosters (OPTIONAL) =====
+   * These are only asked when signal coverage is low.
+   * They should NEVER be required.
+   */
+  next_mock_days?: "3" | "7" | "14" | "21" | "30+";
+  runs_out_of_time?: "yes" | "no";
+  tukka_level?: "low" | "medium" | "high";
+  chaotic_section?: string;
 };
 
 export type AnalyzeInput = {
   exam: Exam;
   intake: Intake;
   text: string;
+};
+
+/**
+ * ========= Strategy / Confidence Meta =========
+ * Stored under report.meta.strategy
+ */
+
+export type StrategyConfidenceBand = "high" | "medium" | "low";
+
+export type NextQuestion = {
+  id: keyof Intake | string;
+  question: string;
+  type: "boolean" | "single_select" | "text";
+  options?: string[];
+  unlocks: string[];
+};
+
+export type StrategyMeta = {
+  confidence_score: number; // 0–100
+  confidence_band: StrategyConfidenceBand;
+  missing_signals: string[];
+  assumptions: string[];
+  next_questions: NextQuestion[]; // max 2
 };

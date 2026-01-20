@@ -32,6 +32,20 @@ export type UserProgressDoc = {
   createdAt?: Date;
 };
 
+export type StrategyMemoryDoc = {
+  _id?: any;
+  userId: string;
+  exam: string; // "CAT" | "NEET" | "JEE" | "UPSC"
+  attemptId: string; // mock_attempts._id as string
+  lever_titles: string[];
+  if_then_rules: string[];
+  confidence_score: number; // 0..100
+  confidence_band: "high" | "medium" | "low";
+  _is_fallback: boolean;
+  createdAt: Date;
+};
+
+
 function normalizeExam(exam: any): ProgressExam | null {
   const x = String(exam || "").trim().toUpperCase();
   if (x === "CAT" || x === "NEET" || x === "JEE") return x;
@@ -97,6 +111,61 @@ export async function saveAttempt(params: {
 
   const res = await attempts.insertOne(doc);
   return res.insertedId.toString(); // return string id for frontend
+}
+export async function saveStrategyMemorySnapshot(params: {
+  userId: string;
+  exam: string;
+  attemptId: string;
+  strategyPlan: any;
+}) {
+  const db = await getDb();
+  const col = db.collection<StrategyMemoryDoc>("strategy_memory");
+
+  const sp = params.strategyPlan || {};
+  const levers = Array.isArray(sp.top_levers) ? sp.top_levers : [];
+  const lever_titles = levers
+    .map((l: any) => String(l?.title || "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+
+  const if_then_rules = (Array.isArray(sp.if_then_rules) ? sp.if_then_rules : [])
+    .map((x: any) => String(x || "").trim())
+    .filter(Boolean)
+    .slice(0, 10);
+
+  const conf = sp.confidence || {};
+  const confidence_score = Number.isFinite(Number(conf.score))
+    ? Math.max(0, Math.min(100, Number(conf.score)))
+    : 50;
+
+  const confidence_band = (String(conf.band || "medium").toLowerCase() === "high"
+    ? "high"
+    : String(conf.band || "medium").toLowerCase() === "low"
+    ? "low"
+    : "medium") as "high" | "medium" | "low";
+
+  const _is_fallback = !!sp._is_fallback;
+
+  const doc: StrategyMemoryDoc = {
+    userId: params.userId,
+    exam: String(params.exam || "").toUpperCase(),
+    attemptId: String(params.attemptId),
+    lever_titles,
+    if_then_rules,
+    confidence_score,
+    confidence_band,
+    _is_fallback,
+    createdAt: new Date(),
+  };
+
+  // upsert by attemptId so re-runs overwrite same attempt snapshot
+  await col.updateOne(
+    { userId: params.userId, attemptId: doc.attemptId },
+    { $set: doc },
+    { upsert: true }
+  );
+
+  return doc;
 }
 
 /**
@@ -302,4 +371,26 @@ export async function toggleProbe(params: {
   );
 
   return col.findOne({ userId: params.userId, exam: ex });
+}
+
+export async function listStrategyMemory(userId: string, exam?: string, limit = 20) {
+  const db = await getDb();
+  const col = db.collection<StrategyMemoryDoc>("strategy_memory");
+
+  const q: any = { userId };
+  if (exam) q.exam = String(exam).toUpperCase();
+
+  const rows = await col.find(q).sort({ createdAt: -1 }).limit(limit).toArray();
+
+  return rows.map((r) => ({
+    id: r._id?.toString?.() || "",
+    attemptId: r.attemptId,
+    exam: r.exam,
+    lever_titles: r.lever_titles,
+    if_then_rules: r.if_then_rules,
+    confidence_score: r.confidence_score,
+    confidence_band: r.confidence_band,
+    _is_fallback: r._is_fallback,
+    createdAt: r.createdAt,
+  }));
 }
