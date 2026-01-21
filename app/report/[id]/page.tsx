@@ -80,6 +80,7 @@ type ProgressDoc = {
     doneAt?: string | null;
     tags?: string[];
   }>;
+  probeMetrics?: Record<string, ProbeResultLocal>;
   confidence: number; // 0..100 (we will write computed value here)
   updatedAt?: string;
 };
@@ -132,6 +133,15 @@ export default function ReportPage() {
       localStorage.setItem(localProbeKey, JSON.stringify(probeMetrics));
     } catch {}
   }, [localProbeKey, probeMetrics]);
+
+  // hydrate probe metrics from DB (merge to preserve local edits)
+  useEffect(() => {
+    if (!progressDoc?.probeMetrics) return;
+    setProbeMetrics((prev) => ({
+      ...progressDoc.probeMetrics,
+      ...prev,
+    }));
+  }, [progressDoc?.probeMetrics]);
 
   function setProbeMetric(probeId: string, patch: Partial<ProbeResultLocal>) {
     setProbeMetrics((prev) => ({
@@ -526,7 +536,6 @@ export default function ReportPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           exam: data.exam,
-          action: "toggle_probe",
           probe: { id: probe.id, title: probe.title, tags: [probe.type] },
           done,
         }),
@@ -627,6 +636,29 @@ export default function ReportPage() {
 
     return () => clearTimeout(t);
   }, [data?.exam, confidenceScore]);
+
+  // ✅ Persist probe metrics to DB (so they survive device changes)
+  useEffect(() => {
+    if (!data?.exam) return;
+
+    const t = setTimeout(() => {
+      fetch("/api/progress", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          exam: data.exam,
+          probeMetrics,
+        }),
+      })
+        .then((r) => r.json())
+        .then((j) => {
+          if (j?.progress) setProgressDoc(j.progress);
+        })
+        .catch(() => {});
+    }, 600);
+
+    return () => clearTimeout(t);
+  }, [data?.exam, probeMetrics]);
 
   const nextMockStrategy = useMemo(() => {
     const base = Array.isArray(r?.next_mock_strategy)

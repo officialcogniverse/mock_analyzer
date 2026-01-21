@@ -26,6 +26,15 @@ export type UserProgressDoc = {
   nextMockInDays?: number; // 2|4|7|14
   minutesPerDay?: number; // 20|40|60|90
   probes?: Probe[];
+  probeMetrics?: Record<
+    string,
+    {
+      accuracy?: number;
+      time_min?: number;
+      self_confidence?: number;
+      notes?: string;
+    }
+  >;
   confidence?: number; // 0..100
   updatedAt?: Date;
   createdAt?: Date;
@@ -44,6 +53,21 @@ export type StrategyMemoryDoc = {
   createdAt: Date;
 };
 
+export type UserLearningStateDoc = {
+  _id?: any;
+  userId: string;
+  exam: Exam;
+  attemptCount: number;
+  lastAttemptAt?: Date;
+  lastScoreValue?: number | null;
+  lastScoreMax?: number | null;
+  lastScorePct?: number | null;
+  rollingScorePct?: number | null;
+  weakTopics?: string[];
+  strategyConfidenceBand?: "high" | "medium" | "low" | null;
+  updatedAt?: Date;
+  createdAt?: Date;
+};
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
@@ -359,6 +383,91 @@ export async function toggleProbe(params: {
     {
       $setOnInsert: { userId: params.userId, exam: ex, createdAt: new Date() },
       $set: { probes, confidence, updatedAt: new Date() },
+    },
+    { upsert: true }
+  );
+
+  return col.findOne({ userId: params.userId, exam: ex });
+}
+
+export async function getUserLearningState(userId: string, exam: string) {
+  const ex = normalizeExam(exam);
+  if (!ex) throw new Error("Invalid exam");
+
+  const db = await getDb();
+  const col = db.collection<UserLearningStateDoc>("user_learning_state");
+
+  return col.findOne({ userId, exam: ex });
+}
+
+export async function updateUserLearningStateFromReport(params: {
+  userId: string;
+  exam: string;
+  report: any;
+}) {
+  const ex = normalizeExam(params.exam);
+  if (!ex) throw new Error("Invalid exam");
+
+  const db = await getDb();
+  const col = db.collection<UserLearningStateDoc>("user_learning_state");
+
+  const existing =
+    (await col.findOne({ userId: params.userId, exam: ex })) || null;
+
+  const estimated = params.report?.estimated_score || {};
+  const rawValue = Number(estimated.value);
+  const rawMax = Number(estimated.max);
+  const lastScoreValue = Number.isFinite(rawValue) ? rawValue : null;
+  const lastScoreMax = Number.isFinite(rawMax) ? rawMax : null;
+  const lastScorePct =
+    Number.isFinite(rawValue) && Number.isFinite(rawMax) && rawMax > 0
+      ? Math.round((rawValue / rawMax) * 100)
+      : null;
+
+  const weaknessTopics = Array.isArray(params.report?.weaknesses)
+    ? params.report.weaknesses
+        .map((w: any) => String(w?.topic || "").trim())
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
+
+  const strategyConfidenceBand =
+    params.report?.meta?.strategy?.confidence_band ??
+    params.report?.meta?.strategy_plan?.confidence?.band ??
+    null;
+
+  const rollingScorePct =
+    lastScorePct === null
+      ? existing?.rollingScorePct ?? null
+      : existing?.rollingScorePct === undefined ||
+          existing?.rollingScorePct === null
+        ? lastScorePct
+        : Math.round(existing.rollingScorePct * 0.7 + lastScorePct * 0.3);
+
+  const attemptCount = Math.max(1, Number(existing?.attemptCount || 0) + 1);
+
+  const patch: Partial<UserLearningStateDoc> = {
+    attemptCount,
+    lastAttemptAt: new Date(),
+    lastScoreValue,
+    lastScoreMax,
+    lastScorePct,
+    rollingScorePct,
+    weakTopics: weaknessTopics,
+    strategyConfidenceBand:
+      strategyConfidenceBand === "high" ||
+      strategyConfidenceBand === "medium" ||
+      strategyConfidenceBand === "low"
+        ? strategyConfidenceBand
+        : null,
+    updatedAt: new Date(),
+  };
+
+  await col.updateOne(
+    { userId: params.userId, exam: ex },
+    {
+      $setOnInsert: { userId: params.userId, exam: ex, createdAt: new Date() },
+      $set: patch,
     },
     { upsert: true }
   );
