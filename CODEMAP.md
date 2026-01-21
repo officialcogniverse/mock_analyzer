@@ -30,6 +30,9 @@ This document provides a system-level map of the codebase so a data architect ca
 - **Progress state**: `/api/progress` reads/writes `user_progress` for probe completion, confidence, and planning settings.
 - **User profile**: `/api/user` reads/writes `users` for display name, default exam, and coach settings.
 
+### 5) Learning state (early personalization)
+- **Learning state**: `/api/learning-state` reads `user_learning_state` derived from recent mocks.
+
 ## Directory map
 ### `app/`
 - **`app/landing/page.tsx`**: main onboarding intake and analysis trigger.
@@ -60,6 +63,8 @@ This document provides a system-level map of the codebase so a data architect ca
   - `userId`, `exam`, `attemptId`, `lever_titles`, `if_then_rules`, `confidence_score`, `confidence_band`, `_is_fallback`, `createdAt`.
 - **`user_progress`** (study plan + probe tracking)
   - `userId`, `exam`, `nextMockInDays`, `minutesPerDay`, `probes`, `confidence`, `createdAt`, `updatedAt`.
+- **`user_learning_state`** (derived per-user signals)
+  - `userId`, `exam`, `attemptCount`, `lastScorePct`, `rollingScorePct`, `weakTopics`, `strategyConfidenceBand`, `createdAt`, `updatedAt`.
 
 ## External dependencies
 - **OpenAI**: used by `lib/analyzer.ts` (Node) and `python_service/main.py` (Python). Requires `OPENAI_API_KEY`.

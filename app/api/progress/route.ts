@@ -23,6 +23,15 @@ const probeSchema = z.object({
   doneAt: z.string().optional().nullable(),
 });
 
+const probeMetricsSchema = z.record(
+  z.object({
+    accuracy: z.number().optional(),
+    time_min: z.number().optional(),
+    self_confidence: z.number().optional(),
+    notes: z.string().optional(),
+  })
+);
+
 const postSchema = z
   .object({
     exam: examSchema,
@@ -40,6 +49,9 @@ const postSchema = z
 
     // allow direct confidence patch (optional)
     confidence: z.number().optional(),
+
+    // optional per-probe metrics (accuracy, time, etc.)
+    probeMetrics: probeMetricsSchema.optional(),
   })
   .strict();
 
@@ -102,7 +114,7 @@ export async function POST(req: Request) {
       return res;
     }
 
-    const { exam, probe, done, probes, ...rest } = parsed.data;
+    const { exam, probe, done, probes, probeMetrics, ...rest } = parsed.data;
 
     await upsertUser(session.userId);
 
@@ -127,6 +139,7 @@ export async function POST(req: Request) {
     if (typeof rest.minutesPerDay === "number")
       patch.minutesPerDay = rest.minutesPerDay;
     if (typeof rest.confidence === "number") patch.confidence = rest.confidence;
+    if (probeMetrics) patch.probeMetrics = probeMetrics;
 
     // ✅ allow seeding probes list
     if (Array.isArray(probes)) {
