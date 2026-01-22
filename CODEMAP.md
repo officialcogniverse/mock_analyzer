@@ -32,7 +32,10 @@ This document provides a system-level map of the codebase so a data architect ca
 
 ### 5) Learning state (early personalization)
 - **Learning state**: `/api/learning-state` reads `user_learning_state` derived from recent mocks.
+### 5) Learning state (early personalization)
+- **Learning state**: `/api/learning-state` reads `user_learning_state` derived from recent mocks.
 - **Next-best actions**: `/api/next-actions` ranks recommendations using strategy plans + learning state.
+
 
 ## Directory map
 ### `app/`

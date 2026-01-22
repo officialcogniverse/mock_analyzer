@@ -49,3 +49,4 @@ export async function GET(req: Request) {
   if (session.isNew) attachUserIdCookie(res, session.userId);
   return res;
 }
+

@@ -71,6 +71,7 @@ export type UserLearningStateDoc = {
   createdAt?: Date;
 };
 
+
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
 }
@@ -427,6 +428,7 @@ export async function updateUserLearningStateFromReport(params: {
   const ex = normalizeExam(params.exam);
   if (!ex) throw new Error("Invalid exam");
 
+
   const db = await getDb();
   const col = db.collection<UserLearningStateDoc>("user_learning_state");
 
@@ -450,13 +452,16 @@ export async function updateUserLearningStateFromReport(params: {
         excludeAttemptId: params.attemptId,
       })
     : null;
+
   const prevEstimated = prevAttempt?.report?.estimated_score || {};
   const prevValue = Number(prevEstimated.value);
   const prevMax = Number(prevEstimated.max);
+
   const prevScorePct =
     Number.isFinite(prevValue) && Number.isFinite(prevMax) && prevMax > 0
       ? Math.round((prevValue / prevMax) * 100)
       : null;
+
   const lastDeltaScorePct =
     lastScorePct !== null && prevScorePct !== null
       ? lastScorePct - prevScorePct
@@ -468,6 +473,7 @@ export async function updateUserLearningStateFromReport(params: {
         .filter(Boolean)
         .slice(0, 4)
     : [];
+
 
   const strategyConfidenceBand =
     params.report?.meta?.strategy?.confidence_band ??
@@ -501,6 +507,7 @@ export async function updateUserLearningStateFromReport(params: {
     lastScoreMax,
     lastScorePct,
     rollingScorePct,
+
     lastDeltaScorePct,
     rollingDeltaScorePct,
     weakTopics: weaknessTopics,
