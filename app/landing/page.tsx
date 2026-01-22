@@ -9,11 +9,10 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { EXAMS, type Exam } from "@/lib/exams";
 import { ensureSession } from "@/lib/userClient";
+import { NextBestActionRail } from "@/components/next-best-action-rail";
 import { Upload, Target, Clock, Brain, FileText } from "lucide-react";
 import { ExamPatternChecklist } from "@/components/ExamPatternChecklist";
-
-// UI-level goal choices (what user clicks)
-type GoalUI = "percentile" | "accuracy" | "speed" | "weak_topics";
+import { sampleNextActions } from "@/lib/sampleData";
 
 // API-level goal choices (what backend zod expects)
 type GoalApi = "score" | "accuracy" | "speed" | "concepts";
@@ -151,15 +150,16 @@ export default function LandingPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-6">
-      <Card className="w-full max-w-2xl rounded-2xl shadow-lg">
-        <CardContent className="p-8 space-y-6">
-          {/* Header */}
-          <div className="space-y-2 text-center">
-            <h1 className="text-3xl font-bold">Cogniverse</h1>
-            <p className="text-muted-foreground">
-              Turn your mock into a clear improvement plan (built for the next mock)
-            </p>
-          </div>
+      <div className="w-full max-w-5xl grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <Card className="w-full rounded-2xl shadow-lg">
+          <CardContent className="p-8 space-y-6">
+            {/* Header */}
+            <div className="space-y-2 text-center">
+              <h1 className="text-3xl font-bold">Cogniverse</h1>
+              <p className="text-muted-foreground">
+                Turn your mock into a clear improvement plan (built for the next mock)
+              </p>
+            </div>
 
           {/* Journey CTA (minimal distraction) */}
           <div className="flex flex-col items-center gap-2 pt-2">
@@ -332,24 +332,33 @@ export default function LandingPage() {
             </div>
           )}
 
-          {/* Navigation */}
-          <div className="flex justify-between pt-4">
-            <Button
-              variant="ghost"
-              disabled={step === 1}
-              onClick={() => setStep((s) => Math.max(1, s - 1))}
-            >
-              Back
-            </Button>
-            <Button
-              disabled={!canGoNext || step === 2}
-              onClick={() => setStep((s) => Math.min(2, s + 1))}
-            >
-              Next
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            {/* Navigation */}
+            <div className="flex justify-between pt-4">
+              <Button
+                variant="ghost"
+                disabled={step === 1}
+                onClick={() => setStep((s) => Math.max(1, s - 1))}
+              >
+                Back
+              </Button>
+              <Button
+                disabled={!canGoNext || step === 2}
+                onClick={() => setStep((s) => Math.min(2, s + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <NextBestActionRail
+          actions={sampleNextActions}
+          title="What this feels like"
+          emptyMessage="Sample report shows your next best action."
+          ctaLabel="View sample report"
+          onCtaClick={() => router.push("/report/sample")}
+        />
+      </div>
     </main>
   );
 }

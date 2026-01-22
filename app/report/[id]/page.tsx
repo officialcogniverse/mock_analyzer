@@ -633,16 +633,25 @@ export default function ReportPage() {
 
   const mainMistake = errorTaxonomy[0] || null;
 
-  const whyItMatters = useMemo(() => {
-    if (!mainMistake) return "Clear the top bottleneck to unlock easy score gains.";
-    if (mainMistake.key === "time")
-      return "Time pressure hides easy wins and drags accuracy late in the paper.";
-    if (mainMistake.key === "careless")
-      return "Careless errors are the fastest points to reclaim with a simple checklist.";
-    if (mainMistake.key === "comprehension")
-      return "Misreads burn time and create avoidable negatives—fixing this lifts accuracy fast.";
-    return "Concept gaps compound across sections; closing them stabilizes your score floor.";
-  }, [mainMistake]);
+const probeAccuracyAvg = useMemo(() => {
+  const values = Object.values(probeMetrics)
+    .map((m) => Number(m?.accuracy))
+    .filter((n) => Number.isFinite(n));
+  if (!values.length) return null;
+  return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+}, [probeMetrics]);
+
+const whyItMatters = useMemo(() => {
+  if (!mainMistake) return "Clear the top bottleneck to unlock easy score gains.";
+  if (mainMistake.key === "time")
+    return "Time pressure hides easy wins and drags accuracy late in the paper.";
+  if (mainMistake.key === "careless")
+    return "Careless errors are the fastest points to reclaim with a simple checklist.";
+  if (mainMistake.key === "comprehension")
+    return "Misreads burn time and create avoidable negatives—fixing this lifts accuracy fast.";
+  return "Concept gaps compound across sections; closing them stabilizes your score floor.";
+}, [mainMistake]);
+
 
   const nextMockDateLabel = useMemo(() => {
     const date = new Date();
@@ -653,16 +662,42 @@ export default function ReportPage() {
       day: "numeric",
     });
   }, [nextMockInDays]);
+const storyLine = useMemo(() => {
+  const action = nextActions[0]?.title || "your next best action";
+  const mistake = mainMistake?.label || "your main pattern";
+  return `This week is about fixing ${mistake.toLowerCase()} and executing “${action}”.`;
+}, [mainMistake, nextActions]);
 
-  // --- Probe pack generation (deterministic, based on report) ---
-  const probes: Probe[] = useMemo(() => {
-    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
-    const topWeak = weaknesses.slice(0, 2).map((w: any, i: number) => {
-      const topic =
-        String(w?.topic || `Weakness ${i + 1}`).trim() ||
-        `Weakness ${i + 1}`;
-      const sev = Number(w?.severity || 3);
-      const mins = sev >= 4 ? 20 : 15;
+const learningUpdateLines = useMemo(() => {
+  const lines: string[] = [];
+  if (probeAccuracyAvg != null) {
+    lines.push(`Probe accuracy avg: ${probeAccuracyAvg}% (used to re-rank actions).`);
+  }
+  if (learningState?.rollingDeltaScorePct != null) {
+    lines.push(
+      `Rolling delta: ${learningState.rollingDeltaScorePct >= 0 ? "+" : ""}${
+        learningState.rollingDeltaScorePct
+      } points over recent mocks.`
+    );
+  }
+  if (plannedDays && minutesPerDay) {
+    lines.push(`Plan adapted to ${plannedDays} days at ${minutesPerDay} min/day for your next mock.`);
+  }
+  if (!lines.length) {
+    lines.push("Add probe metrics to see the engine adapt your plan in real time.");
+  }
+  return lines.slice(0, 3);
+}, [probeAccuracyAvg, learningState?.rollingDeltaScorePct, plannedDays, minutesPerDay]);
+
+// --- Probe pack generation (deterministic, based on report) ---
+const probes: Probe[] = useMemo(() => {
+  const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
+  const topWeak = weaknesses.slice(0, 2).map((w: any, i: number) => {
+    const topic =
+      String(w?.topic || `Weakness ${i + 1}`).trim() ||
+      `Weakness ${i + 1}`;
+    const sev = Number(w?.severity || 3);
+    const mins = sev >= 4 ? 20 : 15;
 
       return {
         id: `topic_${i}_${topic.toLowerCase().replace(/\s+/g, "_").slice(0, 30)}`,
@@ -1175,24 +1210,32 @@ export default function ReportPage() {
               {whyItMatters}
             </div>
 
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card className="p-5 rounded-2xl space-y-2">
+                <div className="text-sm text-muted-foreground">Story mode</div>
+                <div className="text-lg font-semibold">Your next 7 days</div>
+                <div className="text-sm text-muted-foreground">{storyLine}</div>
+                <div className="text-xs text-muted-foreground">
+                  Next mock target: {nextMockDateLabel}
+                </div>
+              </Card>
+
+              <Card className="p-5 rounded-2xl space-y-2">
+                <div className="text-sm text-muted-foreground">Learning engine update</div>
+                <div className="text-lg font-semibold">What the engine learned</div>
+                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                  {learningUpdateLines.map((line, idx) => (
+                    <li key={idx}>{line}</li>
+                  ))}
+                </ul>
+              </Card>
+            </div>
+
             <Card className="p-5 space-y-3 rounded-2xl">
               <div className="text-lg font-semibold">Snapshot</div>
               <div className="text-sm">{r?.summary}</div>
             </Card>
 
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">Accuracy confidence</div>
-                  <div className="text-sm text-muted-foreground">
-                    We calibrate recommendations using scorecard + intake signals. Missing
-                    signals force a safer baseline.
-                  </div>
-                </div>
-                <Badge variant={bandBadge.variant} className="rounded-full">
-                  {bandBadge.label}
-                </Badge>
-              </div>
 
               <div className="flex items-center justify-between">
                 <div className="text-3xl font-bold">{strategyMeta.score}</div>
@@ -1615,6 +1658,7 @@ export default function ReportPage() {
                                     {p.targetAccuracy}%
                                   </span>
                                 </div>
+
                                 <div className="text-sm text-muted-foreground">
                                   Why this matters: {p.why}
                                 </div>
@@ -1643,6 +1687,7 @@ export default function ReportPage() {
                                       placeholder="e.g., 70"
                                     />
                                   </div>
+
                                   <div className="space-y-1">
                                     <div className="text-xs text-muted-foreground">
                                       Time (min)
@@ -1660,6 +1705,7 @@ export default function ReportPage() {
                                       placeholder="e.g., 15"
                                     />
                                   </div>
+
                                   <div className="space-y-1">
                                     <div className="text-xs text-muted-foreground">
                                       Self confidence (1–5)
@@ -1694,23 +1740,7 @@ export default function ReportPage() {
                                 </div>
                               </div>
                             </AccordionContent>
-                          </AccordionItem>
-                        );
-                      })}
-                    </Accordion>
-                  </Card>
 
-                  {/* Next mock strategy (existing + behavior tweaks) */}
-                  {!strategyPlan ? (
-                    <Card className="p-5 rounded-2xl space-y-3">
-                      <div className="text-lg font-semibold">📌 Next Mock Strategy</div>
-                      <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                        {nextMockStrategy.map((s: string, i: number) => (
-                          <li key={i}>{s}</li>
-                        ))}
-                      </ul>
-                    </Card>
-                  ) : null}
 
                   {/* Study plan */}
                   <Card className="p-5 rounded-2xl space-y-3">
@@ -1837,11 +1867,9 @@ export default function ReportPage() {
                       <div className="text-xs text-muted-foreground mt-1">
                         {item.detail}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </div>
+                      <div className="mt-2">
+                        <Progress value={item.value} />
+                      </div>
 
             <Accordion type="single" collapsible className="w-full">
               <AccordionItem value="evidence-detail">
