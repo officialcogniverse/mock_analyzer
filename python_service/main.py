@@ -1017,6 +1017,7 @@ def insights(inp: InsightsInput):
         xps = []
         dom_errors = []
         dates = []
+        series = []
 
         for a in attempts:
             dt = _parse_dt(a.get("createdAt"))
@@ -1034,6 +1035,7 @@ def insights(inp: InsightsInput):
                 xp = 100 - _safe_num(et.get("time", 0), 0)
             xp = _clamp(_safe_num(xp, 0), 0, 100)
             xps.append(xp)
+            series.append({"xp": xp, "date": dt.isoformat() if dt else None})
 
             et = r.get("error_types") or {}
             if isinstance(et, dict) and et:
@@ -1048,6 +1050,7 @@ def insights(inp: InsightsInput):
                 "volatility": 0,
                 "risk_zone": "none",
                 "personas": [],
+                "learning_curve": [],
                 "learning_behavior": {
                     "cadence": "unknown",
                     "streak_days": 0,
@@ -1062,6 +1065,7 @@ def insights(inp: InsightsInput):
 
         xs_chrono = list(reversed(xps))
         reports_chrono = list(reversed(reports))
+        curve_chrono = list(reversed(series))
 
         slope = _lin_slope(xs_chrono)
         if slope > 1.2:
@@ -1128,6 +1132,10 @@ def insights(inp: InsightsInput):
             "volatility": volatility,
             "risk_zone": risk_zone,
             "personas": personas,
+            "learning_curve": [
+                {"index": idx + 1, "xp": s.get("xp", 0), "date": s.get("date")}
+                for idx, s in enumerate(curve_chrono)
+            ],
             "learning_behavior": learning_behavior,
         }
     except Exception as e:
