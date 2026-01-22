@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
+import { NextBestActionRail } from "@/components/next-best-action-rail";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,8 @@ type HistoryItem = {
   createdAt: string | Date;
   summary: string;
   focusXP: number;
+  estimatedScore?: number | null;
+  errorTypes?: Record<string, number>;
 };
 
 type UserDoc = {
@@ -45,6 +48,16 @@ type ProgressDoc = {
 
 type ProgressApiResponse = {
   progress: ProgressDoc;
+};
+
+type NextAction = {
+  id: string;
+  title: string;
+  steps: string[];
+  metric?: string;
+  expectedImpact: "High" | "Medium" | "Low";
+  effort: string;
+  evidence: string[];
 };
 
 function toDayKey(d: Date) {
@@ -119,6 +132,9 @@ export default function HistoryDashboard() {
 
   // per-exam progress state (planner + probes + confidence)
   const [progressDoc, setProgressDoc] = useState<ProgressDoc | null>(null);
+
+  const [nextActions, setNextActions] = useState<NextAction[]>([]);
+  const [nextActionsLoading, setNextActionsLoading] = useState(false);
 
   // profile modal fields
   const [name, setName] = useState("");
@@ -333,9 +349,43 @@ export default function HistoryDashboard() {
 
   const progressExam = progressDoc?.exam || null;
 
+  const nextActionExam = useMemo(
+    () => resolveProgressExam(activeList, examFilter) || progressExam || null,
+    [activeList, examFilter, progressExam]
+  );
+
+  useEffect(() => {
+    if (!nextActionExam) {
+      setNextActions([]);
+      setNextActionsLoading(false);
+      return;
+    }
+
+    let active = true;
+    setNextActionsLoading(true);
+
+    fetch(`/api/next-actions?exam=${encodeURIComponent(nextActionExam)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!active) return;
+        setNextActions(Array.isArray(json?.actions) ? json.actions : []);
+      })
+      .catch(() => {
+        if (active) setNextActions([]);
+      })
+      .finally(() => {
+        if (active) setNextActionsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [nextActionExam]);
+
   return (
     <main className="min-h-screen p-6 flex justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-      <div className="w-full max-w-5xl space-y-4">
+      <div className="w-full max-w-5xl grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="space-y-4">
         {/* Top bar */}
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
@@ -393,7 +443,7 @@ export default function HistoryDashboard() {
 
         {/* Journey CTA */}
         <Card className="p-5 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-lg font-semibold">🧩 Your journey (uplift loop)</div>
               <div className="text-sm text-muted-foreground">
@@ -401,15 +451,20 @@ export default function HistoryDashboard() {
               </div>
             </div>
 
-            {continueId ? (
-              <Button type="button" onClick={() => router.push(`/report/${continueId}`)}>
-                Continue →
+            <div className="flex flex-wrap gap-2">
+              {continueId ? (
+                <Button type="button" onClick={() => router.push(`/report/${continueId}`)}>
+                  Continue →
+                </Button>
+              ) : (
+                <Button type="button" onClick={() => router.push("/")}>
+                  Upload first mock →
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => router.push("/report/sample")}>
+                View sample report
               </Button>
-            ) : (
-              <Button type="button" onClick={() => router.push("/")}>
-                Upload first mock →
-              </Button>
-            )}
+            </div>
           </div>
 
           <div className="grid sm:grid-cols-3 gap-3">
@@ -478,7 +533,9 @@ export default function HistoryDashboard() {
           <Card className="p-5 rounded-2xl space-y-2">
             <div className="text-lg font-semibold">⚡ Streak</div>
             <div className="text-3xl font-bold">{streak}</div>
-            <div className="text-sm text-muted-foreground">Based on uploads</div>
+            <div className="text-sm text-muted-foreground">
+              Counts only full mocks or completed probes.
+            </div>
           </Card>
 
           <Card className="p-5 rounded-2xl space-y-3 bg-gradient-to-r from-purple-500/10 to-indigo-500/10">
@@ -659,6 +716,16 @@ export default function HistoryDashboard() {
         <div className="text-xs text-muted-foreground">
           Loop: Upload → Plan → Probes → Confidence → Next mock → Upload again.
         </div>
+      </div>
+
+      <NextBestActionRail
+        actions={nextActions}
+        loading={nextActionsLoading}
+        title="Next best action"
+        emptyMessage="Analyze a mock to unlock the next best action."
+        ctaLabel={latest ? "Open latest report" : "Upload first mock"}
+        onCtaClick={() => (latest ? router.push(`/report/${latest.id}`) : router.push("/"))}
+      />
       </div>
     </main>
   );
