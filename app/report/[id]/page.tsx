@@ -889,7 +889,7 @@ export default function ReportPage() {
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-3xl font-bold">Your Cogniverse Glow‑Up Report</div>
+            <div className="text-3xl font-bold">Performance Diagnosis & Action Plan</div>
             <div className="text-sm text-muted-foreground">
               Exam: <span className="font-medium">{data.exam}</span> •{" "}
               <span className="font-medium">{vibe}</span>
@@ -908,37 +908,34 @@ export default function ReportPage() {
           </div>
         </div>
 
-        <Tabs defaultValue="quest" className="w-full">
+        <Tabs defaultValue="summary" className="w-full">
           <TabsList className="w-full">
-            <TabsTrigger value="snapshot" className="flex-1">
-              Snapshot
+            <TabsTrigger value="summary" className="flex-1">
+              Summary
             </TabsTrigger>
-            <TabsTrigger value="weakspots" className="flex-1">
-              Weak Spots
+            <TabsTrigger value="actions" className="flex-1">
+              Actions
             </TabsTrigger>
-            <TabsTrigger value="quest" className="flex-1">
-              Glow-Up Plan
+            <TabsTrigger value="evidence" className="flex-1">
+              Evidence
             </TabsTrigger>
           </TabsList>
 
-          {/* SNAPSHOT */}
-          <TabsContent value="snapshot" className="space-y-4">
+          {/* SUMMARY */}
+          <TabsContent value="summary" className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <Card className="p-5 space-y-3 rounded-2xl">
                 <div className="text-lg font-semibold">Snapshot</div>
                 <div className="text-sm">{r?.summary}</div>
               </Card>
 
-              {/* NEW: Engine confidence + assumptions */}
               <Card className="p-5 rounded-2xl space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-lg font-semibold">
-                      🧠 Strategy Confidence
-                    </div>
+                    <div className="text-lg font-semibold">🧠 Data Quality</div>
                     <div className="text-sm text-muted-foreground">
-                      Higher = more complete signals from scorecard + intake. Low still
-                      gives a safe baseline plan.
+                      We calibrate recommendations using scorecard + intake signals. Low
+                      coverage means a safer baseline plan.
                     </div>
                   </div>
                   <Badge variant={bandBadge.variant} className="rounded-full">
@@ -974,15 +971,11 @@ export default function ReportPage() {
                 ) : null}
               </Card>
             </div>
-          </TabsContent>
 
-          {/* WEAK SPOTS */}
-          <TabsContent value="weakspots" className="space-y-4">
             <Card className="p-5 rounded-2xl space-y-3">
-              <div className="text-lg font-semibold">Weak Spots 🎯</div>
-
+              <div className="text-lg font-semibold">Top Insights</div>
               <div className="space-y-3">
-                {(r?.weaknesses || []).map((w: any, i: number) => (
+                {(r?.weaknesses || []).slice(0, 3).map((w: any, i: number) => (
                   <div key={i} className="rounded-xl border p-4 bg-white">
                     <div className="flex items-center justify-between">
                       <div className="font-medium">{w.topic}</div>
@@ -993,12 +986,55 @@ export default function ReportPage() {
                     </div>
                   </div>
                 ))}
+                {(r?.weaknesses || []).length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    No weak spots detected yet. Upload more mock data for sharper insights.
+                  </div>
+                ) : null}
               </div>
+            </Card>
+
+            <Card className="p-5 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-lg font-semibold">Next Best Actions</div>
+                <Badge variant="secondary" className="rounded-full">
+                  Top 3
+                </Badge>
+              </div>
+              {nextActions.length === 0 && !nextActionsLoading ? (
+                <div className="text-sm text-muted-foreground">
+                  Run another mock to unlock personalized actions.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {nextActions.slice(0, 3).map((action) => (
+                    <div key={action.id} className="rounded-xl border bg-white p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium">{action.title}</div>
+                        <Badge
+                          variant={action.expectedImpact === "High" ? "default" : "secondary"}
+                          className="rounded-full"
+                        >
+                          {action.expectedImpact} impact
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Effort: {action.effort}
+                      </div>
+                      {action.evidence?.length ? (
+                        <div className="text-xs text-muted-foreground mt-2">
+                          Recommended because: {action.evidence.slice(0, 2).join(", ")}.
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
           </TabsContent>
 
-          {/* QUEST / UPLIFT */}
-          <TabsContent value="quest" className="space-y-4">
+          {/* ACTIONS */}
+          <TabsContent value="actions" className="space-y-4">
             {/* NEW: Strategy Plan V2 (if present) */}
             {strategyPlan ? (
               <Card className="p-5 rounded-2xl space-y-4">
@@ -1165,7 +1201,7 @@ export default function ReportPage() {
               </Card>
             )}
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-1">
               {/* Confidence */}
               <Card className="p-5 rounded-2xl space-y-3">
                 <div className="flex items-start justify-between gap-3">
@@ -1190,138 +1226,6 @@ export default function ReportPage() {
                 <div className="text-xs text-muted-foreground">
                   Rule: no probes done → score stays low. Completion + accuracy drives it up.
                 </div>
-              </Card>
-
-              {/* Learning curve */}
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-lg font-semibold">📈 Learning Curve</div>
-                  <div className="text-sm text-muted-foreground">
-                    Momentum across recent attempts (focus XP proxy).
-                  </div>
-                </div>
-                <Badge variant="secondary" className="rounded-full">
-                  {titleCase(insights?.trend || "unknown")}
-                </Badge>
-              </div>
-
-              {curveValues.length ? (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-3xl font-bold">
-                      {curveValues[curveValues.length - 1]}
-                    </div>
-                    <Badge
-                      variant={curveDelta >= 0 ? "secondary" : "destructive"}
-                      className="rounded-full"
-                    >
-                      {curveDelta >= 0 ? "+" : ""}
-                      {curveDelta} since start
-                    </Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <Badge variant="outline" className="rounded-full">
-                      Rolling score: {learningState?.rollingScorePct ?? "—"}%
-                    </Badge>
-                    <Badge
-                      variant={
-                        scoreDeltaLabel && scoreDeltaLabel.startsWith("+")
-                          ? "secondary"
-                          : "outline"
-                      }
-                      className="rounded-full"
-                    >
-                      Rolling delta: {scoreDeltaLabel ?? "—"}
-                    </Badge>
-                    <Badge variant="outline" className="rounded-full">
-                      Attempts: {learningState?.attemptCount ?? "—"}
-                    </Badge>
-                  </div>
-                  <svg
-                    viewBox="0 0 260 120"
-                    role="img"
-                    aria-label="Learning curve"
-                    className="w-full h-28"
-                    >
-                      <defs>
-                        <linearGradient id={curveGradientId} x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
-                          <stop offset="100%" stopColor="#ec4899" stopOpacity="0.6" />
-                        </linearGradient>
-                      </defs>
-                      <path
-                        d={curvePath(curveValues, 260, 120, 16)}
-                        fill="none"
-                        stroke={`url(#${curveGradientId})`}
-                        strokeWidth="3"
-                      />
-                    </svg>
-                    <div className="text-xs text-muted-foreground">
-                      {learningCurve.length} mocks • latest signal from your recent runs.
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      {learningCurve.slice(-3).map((point, idx) => (
-                        <Badge key={idx} variant="secondary" className="rounded-full">
-                          Mock {point.index} • {point.xp ?? 0} XP
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    Log at least 2 mocks to unlock the curve.
-                  </div>
-                )}
-              </Card>
-
-              {/* Learning behavior */}
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-lg font-semibold">🧭 Learning Behavior</div>
-                    <div className="text-sm text-muted-foreground">
-                      Signals your engine is picking up.
-                    </div>
-                  </div>
-                  <Badge variant="secondary" className="rounded-full">
-                    {titleCase(lb?.confidence || "unknown")}
-                  </Badge>
-                </div>
-
-                {lb ? (
-                  <>
-                    <div className="flex flex-wrap gap-2">
-                      {lbChips.map((c, i) => (
-                        <Badge
-                          key={i}
-                          variant={c.variant || "secondary"}
-                          className="rounded-full"
-                        >
-                          {c.label}
-                        </Badge>
-                      ))}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Streak {lb.streak_days} days • {lb.weekly_activity}/wk • ΔXP{" "}
-                      {lb.delta_xp ?? 0}
-                    </div>
-                    {Array.isArray(lb?.evidence) && lb.evidence.length ? (
-                      <div className="text-sm">
-                        <div className="font-medium mb-1">Signal evidence</div>
-                        <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                          {lb.evidence.slice(0, 5).map((note: string, i: number) => (
-                            <li key={i}>{note}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    Upload a few attempts to unlock behavior signals.
-                  </div>
-                )}
               </Card>
             </div>
 
@@ -1418,6 +1322,12 @@ export default function ReportPage() {
                     {action.metric ? (
                       <div className="text-xs text-muted-foreground">
                         Metric: {action.metric}
+                      </div>
+                    ) : null}
+
+                    {action.evidence?.length ? (
+                      <div className="text-xs text-muted-foreground">
+                        Why this now: {action.evidence.slice(0, 2).join(", ")}.
                       </div>
                     ) : null}
 
@@ -1606,6 +1516,147 @@ export default function ReportPage() {
                 </div>
               )}
             </Card>
+          </TabsContent>
+
+          {/* EVIDENCE */}
+          <TabsContent value="evidence" className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold">📈 Learning Curve</div>
+                    <div className="text-sm text-muted-foreground">
+                      Momentum across recent attempts (focus XP proxy).
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full">
+                    {titleCase(insights?.trend || "unknown")}
+                  </Badge>
+                </div>
+
+                {curveValues.length ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-3xl font-bold">
+                        {curveValues[curveValues.length - 1]}
+                      </div>
+                      <Badge
+                        variant={curveDelta >= 0 ? "secondary" : "destructive"}
+                        className="rounded-full"
+                      >
+                        {curveDelta >= 0 ? "+" : ""}
+                        {curveDelta} since start
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <Badge variant="outline" className="rounded-full">
+                        Rolling score: {learningState?.rollingScorePct ?? "—"}%
+                      </Badge>
+                      <Badge
+                        variant={
+                          scoreDeltaLabel && scoreDeltaLabel.startsWith("+")
+                            ? "secondary"
+                            : "outline"
+                        }
+                        className="rounded-full"
+                      >
+                        Rolling delta: {scoreDeltaLabel ?? "—"}
+                      </Badge>
+                      <Badge variant="outline" className="rounded-full">
+                        Attempts: {learningState?.attemptCount ?? "—"}
+                      </Badge>
+                    </div>
+                    <svg
+                      viewBox="0 0 260 120"
+                      role="img"
+                      aria-label="Learning curve"
+                      className="w-full h-28"
+                    >
+                      <defs>
+                        <linearGradient
+                          id={curveGradientId}
+                          x1="0"
+                          y1="0"
+                          x2="1"
+                          y2="1"
+                        >
+                          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
+                          <stop offset="100%" stopColor="#ec4899" stopOpacity="0.6" />
+                        </linearGradient>
+                      </defs>
+                      <path
+                        d={curvePath(curveValues, 260, 120, 16)}
+                        fill="none"
+                        stroke={`url(#${curveGradientId})`}
+                        strokeWidth="3"
+                      />
+                    </svg>
+                    <div className="text-xs text-muted-foreground">
+                      {learningCurve.length} mocks • latest signal from your recent runs.
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {learningCurve.slice(-3).map((point, idx) => (
+                        <Badge key={idx} variant="secondary" className="rounded-full">
+                          Mock {point.index} • {point.xp ?? 0} XP
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">
+                    Log at least 2 mocks to unlock the curve.
+                  </div>
+                )}
+              </Card>
+
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-lg font-semibold">🧭 Learning Behavior</div>
+                    <div className="text-sm text-muted-foreground">
+                      Signals your engine is picking up.
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full">
+                    {titleCase(lb?.confidence || "unknown")}
+                  </Badge>
+                </div>
+
+                {lb ? (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {lbChips.map((c, i) => (
+                        <Badge
+                          key={i}
+                          variant={c.variant || "secondary"}
+                          className="rounded-full"
+                        >
+                          {c.label}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Streak {lb.streak_days} days • {lb.weekly_activity}/wk • ΔXP{" "}
+                      {lb.delta_xp ?? 0}
+                    </div>
+                    {Array.isArray(lb?.evidence) && lb.evidence.length ? (
+                      <div className="text-sm">
+                        <div className="font-medium mb-1">Signal evidence</div>
+                        <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                          {lb.evidence.slice(0, 5).map((note: string, i: number) => (
+                            <li key={i}>{note}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="text-sm text-muted-foreground">
+                    Upload a few attempts to unlock behavior signals.
+                  </div>
+                )}
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>

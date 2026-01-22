@@ -71,13 +71,11 @@ export default function LandingPage() {
     } catch {}
   }, []);
 
-  const progress = useMemo(() => (step / 4) * 100, [step]);
+  const progress = useMemo(() => (step / 2) * 100, [step]);
 
   const canGoNext = useMemo(() => {
-    if (step === 1) return !!exam;
-    if (step === 2) return !!goal;
-    if (step === 3) return !!struggle;
-    if (step === 4) return true;
+    if (step === 1) return !!exam && !!goal && !!struggle;
+    if (step === 2) return true;
     return false;
   }, [step, exam, goal, struggle]);
 
@@ -187,108 +185,104 @@ export default function LandingPage() {
           <div className="space-y-2">
             <Progress value={progress} />
             <p className="text-sm text-muted-foreground text-right">
-              Step {step} of 4
+              Step {step} of 2
             </p>
           </div>
 
           {/* STEP 1 */}
           {step === 1 && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <Target className="w-5 h-5" /> Choose your exam
-              </h2>
-              <div className="grid grid-cols-3 gap-4">
-                {EXAMS.map((item) => (
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <h2 className="text-xl font-semibold flex items-center gap-2">
+                  <Target className="w-5 h-5" /> Choose your exam
+                </h2>
+                <div className="grid grid-cols-3 gap-4">
+                  {EXAMS.map((item) => (
+                    <Button
+                      key={item}
+                      variant={choiceBtn(exam === item)}
+                      onClick={() => setExam(item)}
+                    >
+                      {item}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h2 className="text-xl font-semibold flex items-center gap-2">
+                  <Brain className="w-5 h-5" /> Your goal for next 14 days
+                </h2>
+                <div className="grid gap-3">
                   <Button
-                    key={item}
-                    variant={choiceBtn(exam === item)}
-                    onClick={() => setExam(item)}
+                    variant={choiceBtn(goal === "percentile")}
+                    onClick={() => setGoal("percentile")}
                   >
-                    {item}
+                    Improve percentile 🚀
                   </Button>
-                ))}
+                  <Button
+                    variant={choiceBtn(goal === "accuracy")}
+                    onClick={() => setGoal("accuracy")}
+                  >
+                    Improve accuracy 🎯
+                  </Button>
+                  <Button
+                    variant={choiceBtn(goal === "speed")}
+                    onClick={() => setGoal("speed")}
+                  >
+                    Improve speed ⚡
+                  </Button>
+                  <Button
+                    variant={choiceBtn(goal === "weak_topics")}
+                    onClick={() => setGoal("weak_topics")}
+                  >
+                    Strengthen weak topics 📚
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h2 className="text-xl font-semibold flex items-center gap-2">
+                  <Clock className="w-5 h-5" /> Where do you feel you lose marks?
+                </h2>
+                <div className="grid gap-3">
+                  <Button
+                    variant={choiceBtn(struggle === "selection")}
+                    onClick={() => setStruggle("selection")}
+                  >
+                    Poor question selection
+                  </Button>
+                  <Button
+                    variant={choiceBtn(struggle === "time")}
+                    onClick={() => setStruggle("time")}
+                  >
+                    Time pressure
+                  </Button>
+                  <Button
+                    variant={choiceBtn(struggle === "concepts")}
+                    onClick={() => setStruggle("concepts")}
+                  >
+                    Concept gaps
+                  </Button>
+                  <Button
+                    variant={choiceBtn(struggle === "careless")}
+                    onClick={() => setStruggle("careless")}
+                  >
+                    Silly mistakes
+                  </Button>
+                  <Button
+                    variant={choiceBtn(struggle === "anxiety")}
+                    onClick={() => setStruggle("anxiety")}
+                  >
+                    Anxiety / panic
+                  </Button>
+                </div>
               </div>
             </div>
           )}
 
           {/* STEP 2 */}
           {step === 2 && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <Brain className="w-5 h-5" /> Your goal for next 14 days
-              </h2>
-              <div className="grid gap-3">
-                <Button
-                  variant={choiceBtn(goal === "percentile")}
-                  onClick={() => setGoal("percentile")}
-                >
-                  Improve percentile 🚀
-                </Button>
-                <Button
-                  variant={choiceBtn(goal === "accuracy")}
-                  onClick={() => setGoal("accuracy")}
-                >
-                  Improve accuracy 🎯
-                </Button>
-                <Button
-                  variant={choiceBtn(goal === "speed")}
-                  onClick={() => setGoal("speed")}
-                >
-                  Improve speed ⚡
-                </Button>
-                <Button
-                  variant={choiceBtn(goal === "weak_topics")}
-                  onClick={() => setGoal("weak_topics")}
-                >
-                  Strengthen weak topics 📚
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3 */}
-          {step === 3 && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <Clock className="w-5 h-5" /> Where do you feel you lose marks?
-              </h2>
-              <div className="grid gap-3">
-                <Button
-                  variant={choiceBtn(struggle === "selection")}
-                  onClick={() => setStruggle("selection")}
-                >
-                  Poor question selection
-                </Button>
-                <Button
-                  variant={choiceBtn(struggle === "time")}
-                  onClick={() => setStruggle("time")}
-                >
-                  Time pressure
-                </Button>
-                <Button
-                  variant={choiceBtn(struggle === "concepts")}
-                  onClick={() => setStruggle("concepts")}
-                >
-                  Concept gaps
-                </Button>
-                <Button
-                  variant={choiceBtn(struggle === "careless")}
-                  onClick={() => setStruggle("careless")}
-                >
-                  Silly mistakes
-                </Button>
-                <Button
-                  variant={choiceBtn(struggle === "anxiety")}
-                  onClick={() => setStruggle("anxiety")}
-                >
-                  Anxiety / panic
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 4 */}
-          {step === 4 && (
             <div className="space-y-4">
               <h2 className="text-xl font-semibold flex items-center gap-2">
                 <Upload className="w-5 h-5" /> Upload your mock result
@@ -336,8 +330,8 @@ export default function LandingPage() {
               Back
             </Button>
             <Button
-              disabled={!canGoNext || step === 4}
-              onClick={() => setStep((s) => Math.min(4, s + 1))}
+              disabled={!canGoNext || step === 2}
+              onClick={() => setStep((s) => Math.min(2, s + 1))}
             >
               Next
             </Button>
