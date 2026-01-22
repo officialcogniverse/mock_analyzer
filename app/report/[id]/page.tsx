@@ -23,6 +23,14 @@ type ApiOk = {
 };
 
 type ApiErr = { error: string };
+type LearningCurvePoint = { index?: number; xp?: number; date?: string | null };
+type LearningState = {
+  attemptCount?: number;
+  lastScorePct?: number | null;
+  rollingScorePct?: number | null;
+  lastDeltaScorePct?: number | null;
+  rollingDeltaScorePct?: number | null;
+};
 
 function titleCase(x: string) {
   const s = String(x || "").trim();
@@ -48,6 +56,25 @@ function detectedFromText(plan: any) {
   if (missing.length) return `Limited signals: ${missing.slice(0, 2).join(" + ")}`;
 
   return null;
+}
+
+function curvePath(values: number[], width: number, height: number, padding = 16) {
+  if (!values.length) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - padding * 2;
+
+  return values
+    .map((v, i) => {
+      const x =
+        padding +
+        (values.length === 1 ? 0 : (usableWidth * i) / (values.length - 1));
+      const y = padding + usableHeight - ((v - min) / span) * usableHeight;
+      return `${i === 0 ? "M" : "L"}${x},${y}`;
+    })
+    .join(" ");
 }
 
 
@@ -103,6 +130,7 @@ export default function ReportPage() {
   const [error, setError] = useState<string>("");
 
   const [insights, setInsights] = useState<any | null>(null);
+  const [learningState, setLearningState] = useState<LearningState | null>(null);
 
   // DB-backed progress per exam
   const [progressDoc, setProgressDoc] = useState<ProgressDoc | null>(null);
@@ -211,6 +239,14 @@ export default function ReportPage() {
         if (insRes.ok) {
           const ins = await insRes.json();
           if (active) setInsights(ins);
+        }
+
+        const lsRes = await fetch(
+          `/api/learning-state?exam=${encodeURIComponent(data.exam)}`
+        );
+        if (lsRes.ok) {
+          const ls = await lsRes.json();
+          if (active) setLearningState(ls?.learningState || null);
         }
 
         // progress
@@ -383,6 +419,38 @@ export default function ReportPage() {
     }
     return chips.slice(0, 6);
   }, [lb]);
+
+  const learningCurve = useMemo(() => {
+    const raw = Array.isArray(insights?.learning_curve)
+      ? (insights.learning_curve as LearningCurvePoint[])
+      : [];
+    return raw.map((p, idx) => ({
+      index: Number(p?.index ?? idx + 1),
+      xp: Number(p?.xp ?? 0),
+      date: p?.date ?? null,
+    }));
+  }, [insights]);
+
+  const curveValues = useMemo(
+    () =>
+      learningCurve
+        .map((p) => (Number.isFinite(p.xp) ? Number(p.xp) : NaN))
+        .filter((v) => !Number.isNaN(v)),
+    [learningCurve]
+  );
+
+  const curveDelta = useMemo(() => {
+    if (curveValues.length < 2) return 0;
+    return Math.round(curveValues[curveValues.length - 1] - curveValues[0]);
+  }, [curveValues]);
+
+  const curveGradientId = useMemo(() => `curve-${id}`, [id]);
+
+  const scoreDeltaLabel = useMemo(() => {
+    const delta = learningState?.rollingDeltaScorePct ?? null;
+    if (delta === null || delta === undefined) return null;
+    return `${delta >= 0 ? "+" : ""}${delta} pts`;
+  }, [learningState?.rollingDeltaScorePct]);
 
   const vibe = useMemo(() => {
     const conf = r?.estimated_score?.confidence;
@@ -817,11 +885,11 @@ export default function ReportPage() {
 
   return (
     <main className="min-h-screen p-6 flex justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-      <div className="w-full max-w-4xl space-y-4">
+      <div className="w-full max-w-5xl space-y-4">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-3xl font-bold">Your Cogniverse Report</div>
+            <div className="text-3xl font-bold">Your Cogniverse Glow‑Up Report</div>
             <div className="text-sm text-muted-foreground">
               Exam: <span className="font-medium">{data.exam}</span> •{" "}
               <span className="font-medium">{vibe}</span>
@@ -849,59 +917,63 @@ export default function ReportPage() {
               Weak Spots
             </TabsTrigger>
             <TabsTrigger value="quest" className="flex-1">
-              Next Mock Uplift
+              Glow-Up Plan
             </TabsTrigger>
           </TabsList>
 
           {/* SNAPSHOT */}
           <TabsContent value="snapshot" className="space-y-4">
-            <Card className="p-5 space-y-3 rounded-2xl">
-              <div className="text-lg font-semibold">Summary</div>
-              <div className="text-sm">{r?.summary}</div>
-            </Card>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card className="p-5 space-y-3 rounded-2xl">
+                <div className="text-lg font-semibold">Snapshot</div>
+                <div className="text-sm">{r?.summary}</div>
+              </Card>
 
-            {/* NEW: Engine confidence + assumptions */}
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">
-                    🧠 Strategy Confidence (Engine)
+              {/* NEW: Engine confidence + assumptions */}
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold">
+                      🧠 Strategy Confidence
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Higher = more complete signals from scorecard + intake. Low still
+                      gives a safe baseline plan.
+                    </div>
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    Higher = more complete signals from scorecard + intake. Low still
-                    gives a safe baseline plan.
+                  <Badge variant={bandBadge.variant} className="rounded-full">
+                    {bandBadge.label}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="text-3xl font-bold">{strategyMeta.score}</div>
+                  {strategyMeta.missing?.length ? (
+                    <Badge variant="secondary" className="rounded-full">
+                      {strategyMeta.missing.length} missing signals
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="rounded-full">
+                      Signals complete
+                    </Badge>
+                  )}
+                </div>
+                <Progress value={strategyMeta.score} />
+
+                {strategyMeta.assumptions?.length ? (
+                  <div className="text-sm">
+                    <div className="font-medium mb-1">Assumptions used</div>
+                    <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                      {strategyMeta.assumptions
+                        .slice(0, 6)
+                        .map((a: string, i: number) => (
+                          <li key={i}>{a}</li>
+                        ))}
+                    </ul>
                   </div>
-                </div>
-                <Badge variant={bandBadge.variant} className="rounded-full">
-                  {bandBadge.label}
-                </Badge>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="text-3xl font-bold">{strategyMeta.score}</div>
-                {strategyMeta.missing?.length ? (
-                  <Badge variant="secondary" className="rounded-full">
-                    {strategyMeta.missing.length} missing signals
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary" className="rounded-full">
-                    Signals complete
-                  </Badge>
-                )}
-              </div>
-              <Progress value={strategyMeta.score} />
-
-              {strategyMeta.assumptions?.length ? (
-                <div className="text-sm">
-                  <div className="font-medium mb-1">Assumptions used</div>
-                  <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                    {strategyMeta.assumptions.slice(0, 6).map((a: string, i: number) => (
-                      <li key={i}>{a}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </Card>
+                ) : null}
+              </Card>
+            </div>
           </TabsContent>
 
           {/* WEAK SPOTS */}
@@ -932,7 +1004,7 @@ export default function ReportPage() {
               <Card className="p-5 rounded-2xl space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-lg font-semibold">🚀 Next Best Actions</div>
+                    <div className="text-lg font-semibold">🚀 Strategy Playbook</div>
                     <div className="text-sm text-muted-foreground">
                       Constrained levers + rules for your next attempt.
                     </div>
@@ -1081,7 +1153,7 @@ export default function ReportPage() {
               </Card>
             ) : (
               <Card className="p-5 rounded-2xl space-y-2">
-                <div className="text-lg font-semibold">🚀 Next Best Actions</div>
+                <div className="text-lg font-semibold">🚀 Strategy Playbook</div>
                 <div className="text-sm text-muted-foreground">
                   Strategy plan is not available for this attempt yet.
                 </div>
@@ -1093,76 +1165,171 @@ export default function ReportPage() {
               </Card>
             )}
 
-            {/* Confidence */}
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">🎯 Next Mock Confidence</div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {/* Confidence */}
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold">🎯 Next Mock Confidence</div>
+                    <div className="text-sm text-muted-foreground">
+                      This rises when you complete probes + log results.
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="rounded-full">
+                    {confidenceLabel}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="text-3xl font-bold">{confidenceScore}</div>
+                  <Badge variant="secondary" className="rounded-full">
+                    {doneCount}/{probes.length} probes done
+                  </Badge>
+                </div>
+                <Progress value={confidenceScore} />
+                <div className="text-xs text-muted-foreground">
+                  Rule: no probes done → score stays low. Completion + accuracy drives it up.
+                </div>
+              </Card>
+
+              {/* Learning curve */}
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold">📈 Learning Curve</div>
                   <div className="text-sm text-muted-foreground">
-                    This rises when you complete probes + log results.
+                    Momentum across recent attempts (focus XP proxy).
                   </div>
                 </div>
                 <Badge variant="secondary" className="rounded-full">
-                  {confidenceLabel}
+                  {titleCase(insights?.trend || "unknown")}
                 </Badge>
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="text-3xl font-bold">{confidenceScore}</div>
-                <Badge variant="secondary" className="rounded-full">
-                  {doneCount}/{probes.length} probes done
-                </Badge>
-              </div>
-              <Progress value={confidenceScore} />
-              <div className="text-xs text-muted-foreground">
-                Rule: no probes done → score stays low. Completion + accuracy drives it up.
-              </div>
-            </Card>
-
-            {/* Learning behavior (compact) */}
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-lg font-semibold">🧭 Learning Behavior</div>
+              {curveValues.length ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-3xl font-bold">
+                      {curveValues[curveValues.length - 1]}
+                    </div>
+                    <Badge
+                      variant={curveDelta >= 0 ? "secondary" : "destructive"}
+                      className="rounded-full"
+                    >
+                      {curveDelta >= 0 ? "+" : ""}
+                      {curveDelta} since start
+                    </Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <Badge variant="outline" className="rounded-full">
+                      Rolling score: {learningState?.rollingScorePct ?? "—"}%
+                    </Badge>
+                    <Badge
+                      variant={
+                        scoreDeltaLabel && scoreDeltaLabel.startsWith("+")
+                          ? "secondary"
+                          : "outline"
+                      }
+                      className="rounded-full"
+                    >
+                      Rolling delta: {scoreDeltaLabel ?? "—"}
+                    </Badge>
+                    <Badge variant="outline" className="rounded-full">
+                      Attempts: {learningState?.attemptCount ?? "—"}
+                    </Badge>
+                  </div>
+                  <svg
+                    viewBox="0 0 260 120"
+                    role="img"
+                    aria-label="Learning curve"
+                    className="w-full h-28"
+                    >
+                      <defs>
+                        <linearGradient id={curveGradientId} x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
+                          <stop offset="100%" stopColor="#ec4899" stopOpacity="0.6" />
+                        </linearGradient>
+                      </defs>
+                      <path
+                        d={curvePath(curveValues, 260, 120, 16)}
+                        fill="none"
+                        stroke={`url(#${curveGradientId})`}
+                        strokeWidth="3"
+                      />
+                    </svg>
+                    <div className="text-xs text-muted-foreground">
+                      {learningCurve.length} mocks • latest signal from your recent runs.
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {learningCurve.slice(-3).map((point, idx) => (
+                        <Badge key={idx} variant="secondary" className="rounded-full">
+                          Mock {point.index} • {point.xp ?? 0} XP
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
                   <div className="text-sm text-muted-foreground">
-                    Behavior signals across your attempts.
+                    Log at least 2 mocks to unlock the curve.
                   </div>
-                </div>
-                <Badge variant="secondary" className="rounded-full">
-                  {titleCase(lb?.confidence || "unknown")}
-                </Badge>
-              </div>
+                )}
+              </Card>
 
-              {lb ? (
-                <>
-                  <div className="flex flex-wrap gap-2">
-                    {lbChips.map((c, i) => (
-                      <Badge
-                        key={i}
-                        variant={c.variant || "secondary"}
-                        className="rounded-full"
-                      >
-                        {c.label}
-                      </Badge>
-                    ))}
+              {/* Learning behavior */}
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-lg font-semibold">🧭 Learning Behavior</div>
+                    <div className="text-sm text-muted-foreground">
+                      Signals your engine is picking up.
+                    </div>
                   </div>
-
-                  {lb?.notes ? (
-                    <div className="text-sm text-muted-foreground">{lb.notes}</div>
-                  ) : null}
-                </>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  Upload a few attempts to unlock behavior signals.
+                  <Badge variant="secondary" className="rounded-full">
+                    {titleCase(lb?.confidence || "unknown")}
+                  </Badge>
                 </div>
-              )}
-            </Card>
+
+                {lb ? (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {lbChips.map((c, i) => (
+                        <Badge
+                          key={i}
+                          variant={c.variant || "secondary"}
+                          className="rounded-full"
+                        >
+                          {c.label}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Streak {lb.streak_days} days • {lb.weekly_activity}/wk • ΔXP{" "}
+                      {lb.delta_xp ?? 0}
+                    </div>
+                    {Array.isArray(lb?.evidence) && lb.evidence.length ? (
+                      <div className="text-sm">
+                        <div className="font-medium mb-1">Signal evidence</div>
+                        <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                          {lb.evidence.slice(0, 5).map((note: string, i: number) => (
+                            <li key={i}>{note}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="text-sm text-muted-foreground">
+                    Upload a few attempts to unlock behavior signals.
+                  </div>
+                )}
+              </Card>
+            </div>
 
             {/* Planner */}
             <Card className="p-5 rounded-2xl space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-lg font-semibold">🗓️ Plan your next mock</div>
+                  <div className="text-lg font-semibold">🗓️ Lock your next mock</div>
                   <div className="text-sm text-muted-foreground">
                     Tune the plan length + intensity. We’ll scale the daily tasks.
                   </div>
@@ -1209,11 +1376,11 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* Next-best actions */}
+            {/* Ranked actions */}
             <Card className="p-5 rounded-2xl space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-lg font-semibold">🎯 Next Best Actions</div>
+                  <div className="text-lg font-semibold">🎯 Ranked Moves</div>
                   <div className="text-sm text-muted-foreground">
                     Three actions ranked by impact and recent signals.
                   </div>
@@ -1227,7 +1394,7 @@ export default function ReportPage() {
 
               {nextActions.length === 0 && !nextActionsLoading ? (
                 <div className="text-sm text-muted-foreground">
-                  No ranked actions yet. Run another mock to unlock personalized guidance.
+                  No ranked moves yet. Run another mock to unlock personalized guidance.
                 </div>
               ) : null}
 
@@ -1406,7 +1573,7 @@ export default function ReportPage() {
             <Card className="p-5 rounded-2xl space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-lg font-semibold">🗺️ Study Plan</div>
+                  <div className="text-lg font-semibold">🗺️ Daily Quest Plan</div>
                   <div className="text-sm text-muted-foreground">
                     Auto-scaled to your minutes/day and next mock timeline.
                   </div>
