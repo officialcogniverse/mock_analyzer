@@ -39,6 +39,8 @@ export async function GET(req: Request) {
       exam,
       attemptCount: 0,
       rollingScorePct: null,
+      lastDeltaScorePct: null,
+      rollingDeltaScorePct: null,
       weakTopics: [],
       strategyConfidenceBand: null,
     },
@@ -47,3 +49,4 @@ export async function GET(req: Request) {
   if (session.isNew) attachUserIdCookie(res, session.userId);
   return res;
 }
+

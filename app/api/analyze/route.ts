@@ -395,6 +395,7 @@ try {
         userId: session.userId,
         exam,
         report,
+   attemptId,
       });
     } catch (e: any) {
       console.warn(

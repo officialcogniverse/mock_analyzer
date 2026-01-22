@@ -63,11 +63,14 @@ export type UserLearningStateDoc = {
   lastScoreMax?: number | null;
   lastScorePct?: number | null;
   rollingScorePct?: number | null;
+  lastDeltaScorePct?: number | null;
+  rollingDeltaScorePct?: number | null;
   weakTopics?: string[];
   strategyConfidenceBand?: "high" | "medium" | "low" | null;
   updatedAt?: Date;
   createdAt?: Date;
 };
+
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
@@ -193,6 +196,22 @@ export async function getAttemptById(id: string) {
   const attempts = db.collection<any>("mock_attempts");
 
   return attempts.findOne({ _id: new ObjectId(id) });
+}
+
+export async function getLatestAttemptForExam(params: {
+  userId: string;
+  exam: string;
+  excludeAttemptId?: string;
+}) {
+  const db = await getDb();
+  const attempts = db.collection<any>("mock_attempts");
+
+  const q: any = { userId: params.userId, exam: String(params.exam).toUpperCase() };
+  if (params.excludeAttemptId) {
+    q._id = { $ne: new ObjectId(params.excludeAttemptId) };
+  }
+
+  return attempts.find(q).sort({ createdAt: -1 }).limit(1).next();
 }
 
 /**
@@ -404,9 +423,11 @@ export async function updateUserLearningStateFromReport(params: {
   userId: string;
   exam: string;
   report: any;
+  attemptId?: string;
 }) {
   const ex = normalizeExam(params.exam);
   if (!ex) throw new Error("Invalid exam");
+
 
   const db = await getDb();
   const col = db.collection<UserLearningStateDoc>("user_learning_state");
@@ -424,12 +445,35 @@ export async function updateUserLearningStateFromReport(params: {
       ? Math.round((rawValue / rawMax) * 100)
       : null;
 
+  const prevAttempt = params.attemptId
+    ? await getLatestAttemptForExam({
+        userId: params.userId,
+        exam: ex,
+        excludeAttemptId: params.attemptId,
+      })
+    : null;
+
+  const prevEstimated = prevAttempt?.report?.estimated_score || {};
+  const prevValue = Number(prevEstimated.value);
+  const prevMax = Number(prevEstimated.max);
+
+  const prevScorePct =
+    Number.isFinite(prevValue) && Number.isFinite(prevMax) && prevMax > 0
+      ? Math.round((prevValue / prevMax) * 100)
+      : null;
+
+  const lastDeltaScorePct =
+    lastScorePct !== null && prevScorePct !== null
+      ? lastScorePct - prevScorePct
+      : null;
+
   const weaknessTopics = Array.isArray(params.report?.weaknesses)
     ? params.report.weaknesses
         .map((w: any) => String(w?.topic || "").trim())
         .filter(Boolean)
         .slice(0, 4)
     : [];
+
 
   const strategyConfidenceBand =
     params.report?.meta?.strategy?.confidence_band ??
@@ -444,6 +488,16 @@ export async function updateUserLearningStateFromReport(params: {
         ? lastScorePct
         : Math.round(existing.rollingScorePct * 0.7 + lastScorePct * 0.3);
 
+  const rollingDeltaScorePct =
+    lastDeltaScorePct === null
+      ? existing?.rollingDeltaScorePct ?? null
+      : existing?.rollingDeltaScorePct === undefined ||
+          existing?.rollingDeltaScorePct === null
+        ? lastDeltaScorePct
+        : Number(
+            (existing.rollingDeltaScorePct * 0.7 + lastDeltaScorePct * 0.3).toFixed(1)
+          );
+
   const attemptCount = Math.max(1, Number(existing?.attemptCount || 0) + 1);
 
   const patch: Partial<UserLearningStateDoc> = {
@@ -453,6 +507,9 @@ export async function updateUserLearningStateFromReport(params: {
     lastScoreMax,
     lastScorePct,
     rollingScorePct,
+
+    lastDeltaScorePct,
+    rollingDeltaScorePct,
     weakTopics: weaknessTopics,
     strategyConfidenceBand:
       strategyConfidenceBand === "high" ||

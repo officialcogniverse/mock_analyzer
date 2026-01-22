@@ -68,6 +68,16 @@ type ProbeResultLocal = {
   notes?: string;
 };
 
+type NextAction = {
+  id: string;
+  title: string;
+  steps: string[];
+  metric?: string;
+  expectedImpact: "High" | "Medium" | "Low";
+  effort: string;
+  evidence: string[];
+};
+
 type ProgressDoc = {
   userId?: string;
   exam: string;
@@ -106,6 +116,9 @@ export default function ReportPage() {
 
   // local booster answers (UI only for now)
   const [boostAnswers, setBoostAnswers] = useState<Record<string, string>>({});
+
+  const [nextActions, setNextActions] = useState<NextAction[]>([]);
+  const [nextActionsLoading, setNextActionsLoading] = useState(false);
 
   // store last report id so History can “Continue journey”
   useEffect(() => {
@@ -213,6 +226,33 @@ export default function ReportPage() {
         // ignore
       } finally {
         if (active) setProgressLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [data?.exam]);
+
+  // load next-best actions
+  useEffect(() => {
+    if (!data?.exam) return;
+    let active = true;
+    setNextActionsLoading(true);
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/next-actions?exam=${encodeURIComponent(data.exam)}`
+        );
+        const json = await res.json();
+        if (res.ok && active) {
+          setNextActions(Array.isArray(json?.actions) ? json.actions : []);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (active) setNextActionsLoading(false);
       }
     })();
 
@@ -1166,6 +1206,73 @@ export default function ReportPage() {
                     ))}
                   </div>
                 </div>
+              </div>
+            </Card>
+
+            {/* Next-best actions */}
+            <Card className="p-5 rounded-2xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">🎯 Next Best Actions</div>
+                  <div className="text-sm text-muted-foreground">
+                    Three actions ranked by impact and recent signals.
+                  </div>
+                </div>
+                {nextActionsLoading ? (
+                  <Badge variant="secondary" className="rounded-full">
+                    Loading
+                  </Badge>
+                ) : null}
+              </div>
+
+              {nextActions.length === 0 && !nextActionsLoading ? (
+                <div className="text-sm text-muted-foreground">
+                  No ranked actions yet. Run another mock to unlock personalized guidance.
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 md:grid-cols-3">
+                {nextActions.map((action) => (
+                  <Card key={action.id} className="p-4 space-y-3 border-dashed">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium">{action.title}</div>
+                      <Badge
+                        variant={action.expectedImpact === "High" ? "default" : "secondary"}
+                        className="rounded-full"
+                      >
+                        {action.expectedImpact} impact
+                      </Badge>
+                    </div>
+
+                    <div className="text-xs text-muted-foreground">
+                      Effort: {action.effort}
+                    </div>
+
+                    {action.metric ? (
+                      <div className="text-xs text-muted-foreground">
+                        Metric: {action.metric}
+                      </div>
+                    ) : null}
+
+                    {action.steps?.length ? (
+                      <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                        {action.steps.slice(0, 3).map((step, idx) => (
+                          <li key={idx}>{step}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+
+                    {action.evidence?.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {action.evidence.map((tag, idx) => (
+                          <Badge key={idx} variant="outline" className="rounded-full">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+                  </Card>
+                ))}
               </div>
             </Card>
 

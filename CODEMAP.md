@@ -32,6 +32,10 @@ This document provides a system-level map of the codebase so a data architect ca
 
 ### 5) Learning state (early personalization)
 - **Learning state**: `/api/learning-state` reads `user_learning_state` derived from recent mocks.
+### 5) Learning state (early personalization)
+- **Learning state**: `/api/learning-state` reads `user_learning_state` derived from recent mocks.
+- **Next-best actions**: `/api/next-actions` ranks recommendations using strategy plans + learning state.
+
 
 ## Directory map
 ### `app/`
@@ -64,7 +68,7 @@ This document provides a system-level map of the codebase so a data architect ca
 - **`user_progress`** (study plan + probe tracking)
   - `userId`, `exam`, `nextMockInDays`, `minutesPerDay`, `probes`, `confidence`, `createdAt`, `updatedAt`.
 - **`user_learning_state`** (derived per-user signals)
-  - `userId`, `exam`, `attemptCount`, `lastScorePct`, `rollingScorePct`, `weakTopics`, `strategyConfidenceBand`, `createdAt`, `updatedAt`.
+  - `userId`, `exam`, `attemptCount`, `lastScorePct`, `rollingScorePct`, `lastDeltaScorePct`, `rollingDeltaScorePct`, `weakTopics`, `strategyConfidenceBand`, `createdAt`, `updatedAt`.
 
 ## External dependencies
 - **OpenAI**: used by `lib/analyzer.ts` (Node) and `python_service/main.py` (Python). Requires `OPENAI_API_KEY`.
