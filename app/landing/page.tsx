@@ -14,9 +14,6 @@ import { Upload, Target, Clock, Brain, FileText } from "lucide-react";
 import { ExamPatternChecklist } from "@/components/ExamPatternChecklist";
 import { sampleNextActions } from "@/lib/sampleData";
 
-// UI-level goal choices (what user clicks)
-type GoalUI = "percentile" | "accuracy" | "speed" | "weak_topics";
-
 // API-level goal choices (what backend zod expects)
 type GoalApi = "score" | "accuracy" | "speed" | "concepts";
 
