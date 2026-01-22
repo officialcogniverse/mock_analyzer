@@ -55,6 +55,10 @@ The following feature ideas are prioritized for impact and data leverage:
 5. **Cohort insights dashboard**: aggregate anonymized trends to show percentile benchmarks, common mistakes, and progress velocity.
 6. **Scheduled nudge + plan adherence**: reminders for daily plan tasks, streaks, and mock prep countdown to reduce drop-off.
 
+## Learning behavior engine plan
+
+For a concrete plan to improve accuracy and build a per-user learning behavior engine with next-best-action recommendations, see [`docs/learning-engine.md`](./docs/learning-engine.md).
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

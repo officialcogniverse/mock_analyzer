@@ -4,7 +4,12 @@ import { extractTextFromPdf } from "@/lib/extractText";
 import { detectExamFromText } from "@/lib/examDetect";
 import { normalizeExam } from "@/lib/exams";
 import type { Exam, Intake } from "@/lib/types";
-import { upsertUser, saveAttempt, saveStrategyMemorySnapshot } from "@/lib/persist";
+import {
+  upsertUser,
+  saveAttempt,
+  saveStrategyMemorySnapshot,
+  updateUserLearningStateFromReport,
+} from "@/lib/persist";
 import { analyzeViaPython } from "@/lib/pythonClient";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
 import { z } from "zod";
@@ -384,6 +389,20 @@ try {
   console.warn("Strategy memory snapshot failed:", e?.message ?? e);
 }
 
+
+    try {
+      await updateUserLearningStateFromReport({
+        userId: session.userId,
+        exam,
+        report,
+        attemptId,
+      });
+    } catch (e: any) {
+      console.warn(
+        "User learning state update failed:",
+        e?.message ?? e
+      );
+    }
 
     const res = NextResponse.json({ id: attemptId });
     if (session.isNew) attachUserIdCookie(res, session.userId);
