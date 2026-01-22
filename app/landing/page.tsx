@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EXAMS, type Exam } from "@/lib/exams";
 import { ensureSession } from "@/lib/userClient";
 import { Upload, Target, Clock, Brain, FileText } from "lucide-react";
+import { ExamPatternChecklist } from "@/components/ExamPatternChecklist";
 
 // UI-level goal choices (what user clicks)
 type GoalUI = "percentile" | "accuracy" | "speed" | "weak_topics";
@@ -162,9 +163,14 @@ export default function LandingPage() {
 
           {/* Journey CTA (minimal distraction) */}
           <div className="flex flex-col items-center gap-2 pt-2">
-            <Button variant="secondary" onClick={() => router.push("/history")}>
-              Continue my journey →
-            </Button>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button variant="secondary" onClick={() => router.push("/history")}>
+                Continue my journey →
+              </Button>
+              <Button variant="outline" onClick={() => router.push("/report/sample")}>
+                View sample report
+              </Button>
+            </div>
 
             {lastReportId ? (
               <button
@@ -278,6 +284,12 @@ export default function LandingPage() {
                   </Button>
                 </div>
               </div>
+
+              <ExamPatternChecklist
+                exam={exam}
+                title="Exam pattern checklist"
+                subtitle="We align your plan to the real exam format, timing, and marking."
+              />
             </div>
           )}
 
