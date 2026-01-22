@@ -239,6 +239,8 @@ export async function listAttempts(userId: string, limit = 20) {
         0
       )
     ),
+    estimatedScore: r.report?.estimated_score?.value ?? null,
+    errorTypes: r.report?.error_types ?? {},
   }));
 }
 

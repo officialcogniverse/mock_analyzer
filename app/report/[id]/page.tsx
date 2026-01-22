@@ -8,12 +8,22 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ExamPatternChecklist } from "@/components/ExamPatternChecklist";
+import { NextBestActionRail } from "@/components/next-best-action-rail";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import {
+  sampleHistoryItems,
+  sampleInsights,
+  sampleLearningState,
+  sampleNextActions,
+  sampleProgressDoc,
+  sampleReportPayload,
+} from "@/lib/sampleData";
 
 type ApiOk = {
   id: string;
@@ -30,6 +40,15 @@ type LearningState = {
   rollingScorePct?: number | null;
   lastDeltaScorePct?: number | null;
   rollingDeltaScorePct?: number | null;
+};
+type HistoryItem = {
+  id: string;
+  exam: string;
+  createdAt: string | Date;
+  summary?: string;
+  focusXP?: number;
+  estimatedScore?: number | null;
+  errorTypes?: Record<string, number>;
 };
 
 function titleCase(x: string) {
@@ -86,6 +105,8 @@ type Probe = {
   title: string;
   minutes: number;
   instructions: string[];
+  targetAccuracy: number;
+  why: string;
 };
 
 type ProbeResultLocal = {
@@ -125,12 +146,15 @@ type ProgressDoc = {
 export default function ReportPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const isSample = id === "sample";
 
   const [data, setData] = useState<ApiOk | null>(null);
   const [error, setError] = useState<string>("");
+  const [tabValue, setTabValue] = useState("summary");
 
   const [insights, setInsights] = useState<any | null>(null);
   const [learningState, setLearningState] = useState<LearningState | null>(null);
+  const [recentAttempts, setRecentAttempts] = useState<HistoryItem[]>([]);
 
   // DB-backed progress per exam
   const [progressDoc, setProgressDoc] = useState<ProgressDoc | null>(null);
@@ -151,10 +175,11 @@ export default function ReportPage() {
   // store last report id so History can “Continue journey”
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (isSample) return;
     try {
       localStorage.setItem("cogniverse_last_report_id", String(id));
     } catch {}
-  }, [id]);
+  }, [id, isSample]);
 
   // load local probe metrics
   useEffect(() => {
@@ -197,6 +222,12 @@ export default function ReportPage() {
   useEffect(() => {
     (async () => {
       try {
+        if (isSample) {
+          setData(sampleReportPayload as ApiOk);
+          setError("");
+          return;
+        }
+
         const res = await fetch(`/api/report/${id}`);
         const json = (await res.json()) as ApiOk | ApiErr;
 
@@ -219,7 +250,7 @@ export default function ReportPage() {
         setData(null);
       }
     })();
-  }, [id]);
+  }, [id, isSample]);
 
   const r = data?.report;
 
@@ -232,6 +263,16 @@ export default function ReportPage() {
 
     (async () => {
       try {
+        if (isSample) {
+          if (active) {
+            setInsights(sampleInsights);
+            setLearningState(sampleLearningState as LearningState);
+            setProgressDoc(sampleProgressDoc as ProgressDoc);
+            setRecentAttempts(sampleHistoryItems as HistoryItem[]);
+          }
+          return;
+        }
+
         // insights
         const insRes = await fetch(
           `/api/insights?exam=${encodeURIComponent(data.exam)}&lastN=10`
@@ -258,6 +299,14 @@ export default function ReportPage() {
         if (prRes.ok && active) {
           setProgressDoc(pr?.progress || pr || null);
         }
+
+        const histRes = await fetch(
+          `/api/history?exam=${encodeURIComponent(data.exam)}&limit=6`
+        );
+        const hist = await histRes.json();
+        if (histRes.ok && active) {
+          setRecentAttempts(Array.isArray(hist?.items) ? hist.items : []);
+        }
       } catch {
         // ignore
       } finally {
@@ -268,7 +317,7 @@ export default function ReportPage() {
     return () => {
       active = false;
     };
-  }, [data?.exam]);
+  }, [data?.exam, isSample]);
 
   // load next-best actions
   useEffect(() => {
@@ -278,6 +327,11 @@ export default function ReportPage() {
 
     (async () => {
       try {
+        if (isSample) {
+          if (active) setNextActions(sampleNextActions);
+          return;
+        }
+
         const res = await fetch(
           `/api/next-actions?exam=${encodeURIComponent(data.exam)}`
         );
@@ -295,7 +349,7 @@ export default function ReportPage() {
     return () => {
       active = false;
     };
-  }, [data?.exam]);
+  }, [data?.exam, isSample]);
 
   // Planner values from DB (fallback defaults)
   const nextMockInDays = useMemo(() => {
@@ -312,7 +366,7 @@ export default function ReportPage() {
     nextMockInDays?: number;
     minutesPerDay?: number;
   }) {
-    if (!data?.exam) return;
+    if (!data?.exam || isSample) return;
     try {
       // optimistic UI
       setProgressDoc((prev) =>
@@ -377,6 +431,91 @@ export default function ReportPage() {
       return { ...dayObj, day: dayNum, time_minutes: newMinutes, tasks: newTasks };
     });
   }, [r, plannedDays, minutesPerDay]);
+
+  const weeklyPlan = useMemo(() => {
+    if (!adjustedPlan.length) return [];
+    const weeks: Array<{
+      week: number;
+      days: number[];
+      totalMinutes: number;
+      taskCount: number;
+      focus: string[];
+    }> = [];
+
+    for (let i = 0; i < adjustedPlan.length; i += 7) {
+      const chunk = adjustedPlan.slice(i, i + 7);
+      const weekIndex = Math.floor(i / 7) + 1;
+      weeks.push({
+        week: weekIndex,
+        days: chunk.map((d: any) => Number(d.day)),
+        totalMinutes: chunk.reduce(
+          (sum: number, d: any) => sum + (Number(d.time_minutes) || 0),
+          0
+        ),
+        taskCount: chunk.reduce(
+          (sum: number, d: any) => sum + (Array.isArray(d.tasks) ? d.tasks.length : 0),
+          0
+        ),
+        focus: Array.from(
+          new Set(chunk.map((d: any) => String(d.focus || "")).filter(Boolean))
+        ),
+      });
+    }
+
+    return weeks;
+  }, [adjustedPlan]);
+
+  const outcomeDeltas = useMemo(() => {
+    const sorted = [...recentAttempts].sort((a, b) => {
+      const ad = new Date(a.createdAt).getTime();
+      const bd = new Date(b.createdAt).getTime();
+      return bd - ad;
+    });
+    const recent = sorted.slice(0, 3);
+    const previous = sorted.slice(3, 6);
+
+    const avg = (list: HistoryItem[], pick: (x: HistoryItem) => number | null) => {
+      const values = list
+        .map((item) => pick(item))
+        .filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
+      if (!values.length) return null;
+      return values.reduce((a, b) => a + b, 0) / values.length;
+    };
+
+    const toAccuracy = (item: HistoryItem) => {
+      const et = item.errorTypes || {};
+      const careless = Number(et.careless || 0);
+      const comprehension = Number(et.comprehension || 0);
+      return Math.max(0, Math.min(100, 100 - careless - comprehension));
+    };
+
+    const toSpeed = (item: HistoryItem) => {
+      const et = item.errorTypes || {};
+      const time = Number(et.time || 0);
+      return Math.max(0, Math.min(100, 100 - time));
+    };
+
+    const recentScore = avg(recent, (x) =>
+      typeof x.estimatedScore === "number" ? x.estimatedScore : null
+    );
+    const previousScore = avg(previous, (x) =>
+      typeof x.estimatedScore === "number" ? x.estimatedScore : null
+    );
+    const recentAccuracy = avg(recent, (x) => toAccuracy(x));
+    const previousAccuracy = avg(previous, (x) => toAccuracy(x));
+    const recentSpeed = avg(recent, (x) => toSpeed(x));
+    const previousSpeed = avg(previous, (x) => toSpeed(x));
+
+    const delta = (a: number | null, b: number | null) =>
+      a != null && b != null ? Math.round((a - b) * 10) / 10 : null;
+
+    return {
+      scoreDelta: delta(recentScore, previousScore),
+      accuracyDelta: delta(recentAccuracy, previousAccuracy),
+      speedDelta: delta(recentSpeed, previousSpeed),
+      hasEnough: recent.length >= 3 && previous.length >= 3,
+    };
+  }, [recentAttempts]);
 
   // learning behavior
   const lb = insights?.learning_behavior || null;
@@ -459,22 +598,98 @@ export default function ReportPage() {
     return "🌱 Building momentum";
   }, [r]);
 
-  const focusXP = useMemo(() => {
-    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
-    const raw = weaknesses.reduce(
-      (sum: number, w: any) => sum + (Number(w?.severity) || 0) * 10,
-      0
-    );
-    return Math.min(100, Math.max(0, raw));
+  const errorTaxonomy = useMemo(() => {
+    const errorTypes = r?.error_types || {};
+    const defs = [
+      {
+        key: "conceptual",
+        label: "Conceptual misunderstanding",
+        detail: "Gaps in core concepts or formulas.",
+      },
+      {
+        key: "comprehension",
+        label: "Misread / misinterpretation",
+        detail: "Missing constraints or misreading the question intent.",
+      },
+      {
+        key: "time",
+        label: "Time pressure / speed",
+        detail: "Running out of time or stuck too long on hard items.",
+      },
+      {
+        key: "careless",
+        label: "Calculation / careless",
+        detail: "Silly mistakes, sign errors, or arithmetic slips.",
+      },
+    ];
+
+    return defs
+      .map((d) => ({
+        ...d,
+        value: Math.max(0, Math.min(100, Number((errorTypes as any)[d.key] || 0))),
+      }))
+      .sort((a, b) => b.value - a.value);
   }, [r]);
 
-  const traps = useMemo(() => {
-    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
-    return weaknesses
-      .map((w: any) => String(w?.topic || "").trim())
-      .filter(Boolean)
-      .slice(0, 8);
-  }, [r]);
+  const mainMistake = errorTaxonomy[0] || null;
+
+  const probeAccuracyAvg = useMemo(() => {
+    const values = Object.values(probeMetrics)
+      .map((m) => Number(m?.accuracy))
+      .filter((n) => Number.isFinite(n));
+    if (!values.length) return null;
+    return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  }, [probeMetrics]);
+
+  const whyItMatters = useMemo(() => {
+    if (!mainMistake) return "Clear the top bottleneck to unlock easy score gains.";
+    if (mainMistake.key === "time")
+      return "Time pressure hides easy wins and drags accuracy late in the paper.";
+    if (mainMistake.key === "careless")
+      return "Careless errors are the fastest points to reclaim with a simple checklist.";
+    if (mainMistake.key === "comprehension")
+      return "Misreads burn time and create avoidable negatives—fixing this lifts accuracy fast.";
+    return "Concept gaps compound across sections; closing them stabilizes your score floor.";
+  }, [mainMistake]);
+
+  const nextMockDateLabel = useMemo(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + Number(nextMockInDays || 7));
+    return date.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  }, [nextMockInDays]);
+
+  const storyLine = useMemo(() => {
+    const action = nextActions[0]?.title || "your next best action";
+    const mistake = mainMistake?.label || "your main pattern";
+    return `This week is about fixing ${mistake.toLowerCase()} and executing “${action}”.`;
+  }, [mainMistake, nextActions]);
+
+  const learningUpdateLines = useMemo(() => {
+    const lines: string[] = [];
+    if (probeAccuracyAvg != null) {
+      lines.push(`Probe accuracy avg: ${probeAccuracyAvg}% (used to re-rank actions).`);
+    }
+    if (learningState?.rollingDeltaScorePct != null) {
+      lines.push(
+        `Rolling delta: ${learningState.rollingDeltaScorePct >= 0 ? "+" : ""}${
+          learningState.rollingDeltaScorePct
+        } points over recent mocks.`
+      );
+    }
+    if (plannedDays && minutesPerDay) {
+      lines.push(
+        `Plan adapted to ${plannedDays} days at ${minutesPerDay} min/day for your next mock.`
+      );
+    }
+    if (!lines.length) {
+      lines.push("Add probe metrics to see the engine adapt your plan in real time.");
+    }
+    return lines.slice(0, 3);
+  }, [probeAccuracyAvg, learningState?.rollingDeltaScorePct, plannedDays, minutesPerDay]);
 
   // --- Probe pack generation (deterministic, based on report) ---
   const probes: Probe[] = useMemo(() => {
@@ -496,6 +711,8 @@ export default function ReportPage() {
           "Mark every wrong answer: why wrong? concept vs careless vs time.",
           "Write 3 takeaway rules (what you’ll do differently next time).",
         ],
+        targetAccuracy: 75,
+        why: "Topic drills rebuild accuracy on the weakest concepts.",
       };
     });
 
@@ -543,6 +760,8 @@ export default function ReportPage() {
               "After each, tag your error type (if wrong).",
               "Goal: stable execution under light time pressure.",
             ],
+      targetAccuracy: 80,
+      why: "Execution drills reduce time pressure and careless drops.",
     };
 
     const reviewProbe: Probe = {
@@ -555,6 +774,8 @@ export default function ReportPage() {
         "For each: write (1) why wrong, (2) correct method, (3) your rule.",
         "Goal: convert mistakes into repeatable rules.",
       ],
+      targetAccuracy: 85,
+      why: "Review drills lock corrections so the same errors don’t repeat.",
     };
 
     return [...topWeak, execProbe, reviewProbe].slice(0, 5);
@@ -576,7 +797,7 @@ export default function ReportPage() {
 
   // ✅ OPTIONAL: Seed probe list into DB once (only if empty)
   useEffect(() => {
-    if (!data?.exam) return;
+    if (!data?.exam || isSample) return;
     if (!probes.length) return;
 
     const existing = (progressDoc?.probes || []).length;
@@ -604,7 +825,7 @@ export default function ReportPage() {
   }, [data?.exam, probes, progressDoc?.probes]);
 
   async function toggleProbeDone(probe: Probe, done: boolean) {
-    if (!data?.exam) return;
+    if (!data?.exam || isSample) return;
 
     // optimistic UI
     setProgressDoc((prev) => {
@@ -885,7 +1106,8 @@ export default function ReportPage() {
 
   return (
     <main className="min-h-screen p-6 flex justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-      <div className="w-full max-w-5xl space-y-4">
+      <div className="w-full max-w-5xl grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="space-y-4">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -908,7 +1130,7 @@ export default function ReportPage() {
           </div>
         </div>
 
-        <Tabs defaultValue="summary" className="w-full">
+        <Tabs value={tabValue} onValueChange={setTabValue} className="w-full">
           <TabsList className="w-full">
             <TabsTrigger value="summary" className="flex-1">
               Summary
@@ -923,57 +1145,143 @@ export default function ReportPage() {
 
           {/* SUMMARY */}
           <TabsContent value="summary" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card className="p-5 space-y-3 rounded-2xl">
-                <div className="text-lg font-semibold">Snapshot</div>
-                <div className="text-sm">{r?.summary}</div>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <Card className="p-5 rounded-2xl space-y-2">
+                <div className="text-sm text-muted-foreground">Main mistake pattern</div>
+                <div className="text-lg font-semibold">
+                  {mainMistake?.label || "No dominant pattern yet"}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {mainMistake
+                    ? `${mainMistake.value}% of your recent errors · ${mainMistake.detail}`
+                    : "Upload a few mocks to surface your dominant pattern."}
+                </div>
               </Card>
 
               <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-lg font-semibold">🧠 Data Quality</div>
-                    <div className="text-sm text-muted-foreground">
-                      We calibrate recommendations using scorecard + intake signals. Low
-                      coverage means a safer baseline plan.
-                    </div>
-                  </div>
-                  <Badge variant={bandBadge.variant} className="rounded-full">
-                    {bandBadge.label}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm text-muted-foreground">Top 3 actions</div>
+                  <Badge variant="secondary" className="rounded-full">
+                    Ranked
                   </Badge>
                 </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="text-3xl font-bold">{strategyMeta.score}</div>
-                  {strategyMeta.missing?.length ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {strategyMeta.missing.length} missing signals
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="rounded-full">
-                      Signals complete
-                    </Badge>
-                  )}
-                </div>
-                <Progress value={strategyMeta.score} />
-
-                {strategyMeta.assumptions?.length ? (
-                  <div className="text-sm">
-                    <div className="font-medium mb-1">Assumptions used</div>
-                    <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                      {strategyMeta.assumptions
-                        .slice(0, 6)
-                        .map((a: string, i: number) => (
-                          <li key={i}>{a}</li>
-                        ))}
-                    </ul>
+                {nextActions.length === 0 && !nextActionsLoading ? (
+                  <div className="text-sm text-muted-foreground">
+                    Run another mock to unlock personalized actions.
                   </div>
-                ) : null}
+                ) : (
+                  <div className="space-y-2 text-sm">
+                    {nextActions.slice(0, 3).map((action, idx) => (
+                      <div key={action.id} className="rounded-xl border bg-white p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-medium">
+                            {idx + 1}. {action.title}
+                          </div>
+                          <Badge
+                            variant={action.expectedImpact === "High" ? "default" : "secondary"}
+                            className="rounded-full"
+                          >
+                            {action.expectedImpact}
+                          </Badge>
+                        </div>
+                        {action.evidence?.length ? (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            Recommended because your last mocks showed:{" "}
+                            {action.evidence.slice(0, 2).join(", ")}.
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              <Card className="p-5 rounded-2xl space-y-2">
+                <div className="text-sm text-muted-foreground">Next mock readiness</div>
+                <div className="text-3xl font-bold">{confidenceScore}</div>
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>{confidenceLabel} confidence</span>
+                  <span>Next mock: {nextMockDateLabel}</span>
+                </div>
+                <Progress value={confidenceScore} />
               </Card>
             </div>
 
+            <div className="text-sm text-muted-foreground">
+              <span className="font-medium text-slate-900">Why it matters:</span>{" "}
+              {whyItMatters}
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card className="p-5 rounded-2xl space-y-2">
+                <div className="text-sm text-muted-foreground">Story mode</div>
+                <div className="text-lg font-semibold">Your next 7 days</div>
+                <div className="text-sm text-muted-foreground">{storyLine}</div>
+                <div className="text-xs text-muted-foreground">
+                  Next mock target: {nextMockDateLabel}
+                </div>
+              </Card>
+
+              <Card className="p-5 rounded-2xl space-y-2">
+                <div className="text-sm text-muted-foreground">Learning engine update</div>
+                <div className="text-lg font-semibold">What the engine learned</div>
+                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                  {learningUpdateLines.map((line, idx) => (
+                    <li key={idx}>{line}</li>
+                  ))}
+                </ul>
+              </Card>
+            </div>
+
+            <Card className="p-5 space-y-3 rounded-2xl">
+              <div className="text-lg font-semibold">Snapshot</div>
+              <div className="text-sm">{r?.summary}</div>
+            </Card>
+
             <Card className="p-5 rounded-2xl space-y-3">
-              <div className="text-lg font-semibold">Top Insights</div>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">Accuracy confidence</div>
+                  <div className="text-sm text-muted-foreground">
+                    We calibrate recommendations using scorecard + intake signals. Missing
+                    signals force a safer baseline.
+                  </div>
+                </div>
+                <Badge variant={bandBadge.variant} className="rounded-full">
+                  {bandBadge.label}
+                </Badge>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="text-3xl font-bold">{strategyMeta.score}</div>
+                {strategyMeta.missing?.length ? (
+                  <Badge variant="secondary" className="rounded-full">
+                    {strategyMeta.missing.length} missing signals
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="rounded-full">
+                    Signals complete
+                  </Badge>
+                )}
+              </div>
+              <Progress value={strategyMeta.score} />
+
+              {strategyMeta.assumptions?.length ? (
+                <div className="text-sm">
+                  <div className="font-medium mb-1">Assumptions used</div>
+                  <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                    {strategyMeta.assumptions
+                      .slice(0, 6)
+                      .map((a: string, i: number) => (
+                        <li key={i}>{a}</li>
+                      ))}
+                  </ul>
+                </div>
+              ) : null}
+            </Card>
+
+            <Card className="p-5 rounded-2xl space-y-3">
+              <div className="text-lg font-semibold">Top insights</div>
               <div className="space-y-3">
                 {(r?.weaknesses || []).slice(0, 3).map((w: any, i: number) => (
                   <div key={i} className="rounded-xl border p-4 bg-white">
@@ -994,43 +1302,11 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-lg font-semibold">Next Best Actions</div>
-                <Badge variant="secondary" className="rounded-full">
-                  Top 3
-                </Badge>
-              </div>
-              {nextActions.length === 0 && !nextActionsLoading ? (
-                <div className="text-sm text-muted-foreground">
-                  Run another mock to unlock personalized actions.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {nextActions.slice(0, 3).map((action) => (
-                    <div key={action.id} className="rounded-xl border bg-white p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="font-medium">{action.title}</div>
-                        <Badge
-                          variant={action.expectedImpact === "High" ? "default" : "secondary"}
-                          className="rounded-full"
-                        >
-                          {action.expectedImpact} impact
-                        </Badge>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        Effort: {action.effort}
-                      </div>
-                      {action.evidence?.length ? (
-                        <div className="text-xs text-muted-foreground mt-2">
-                          Recommended because: {action.evidence.slice(0, 2).join(", ")}.
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
+            <ExamPatternChecklist
+              exam={data.exam}
+              title="Exam pattern checklist"
+              subtitle="Advice is aligned to the official format, timing, and marking."
+            />
           </TabsContent>
 
           {/* ACTIONS */}
@@ -1353,312 +1629,445 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            {/* Probes */}
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">🧪 Probe Pack</div>
-                  <div className="text-sm text-muted-foreground">
-                    Complete these mini drills to raise confidence and improve next mock execution.
-                  </div>
-                </div>
-                <Badge variant="secondary" className="rounded-full">
-                  {doneCount}/{probes.length} done
-                </Badge>
-              </div>
-
-              <Accordion type="single" collapsible className="w-full">
-                {probes.map((p) => {
-                  const done = !!doneMap[p.id];
-                  const metrics = probeMetrics[p.id] || {};
-                  return (
-                    <AccordionItem key={p.id} value={p.id}>
-                      <AccordionTrigger>
-                        <div className="flex items-center gap-2">
-                          <span>{p.title}</span>
-                          <Badge
-                            variant={done ? "secondary" : "outline"}
-                            className="rounded-full"
-                          >
-                            {done ? "Done" : `${p.minutes} min`}
-                          </Badge>
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="action-details">
+                <AccordionTrigger>Show detail</AccordionTrigger>
+                <AccordionContent className="space-y-4">
+                  {/* Probes */}
+                  <Card className="p-5 rounded-2xl space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-semibold">🧪 Probe Pack</div>
+                        <div className="text-sm text-muted-foreground">
+                          Complete these mini drills to raise confidence and improve next mock
+                          execution.
                         </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="space-y-3">
-                          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                            {p.instructions.map((t, i) => (
-                              <li key={i}>{t}</li>
-                            ))}
-                          </ul>
+                      </div>
+                      <Badge variant="secondary" className="rounded-full">
+                        {doneCount}/{probes.length} done
+                      </Badge>
+                    </div>
 
-                          <div className="grid md:grid-cols-3 gap-3">
-                            <div className="space-y-1">
-                              <div className="text-xs text-muted-foreground">
-                                Accuracy (%)
+                    <Accordion type="single" collapsible className="w-full">
+                      {probes.map((p) => {
+                        const done = !!doneMap[p.id];
+                        const metrics = probeMetrics[p.id] || {};
+                        return (
+                          <AccordionItem key={p.id} value={p.id}>
+                            <AccordionTrigger>
+                              <div className="flex items-center gap-2">
+                                <span>{p.title}</span>
+                                <Badge
+                                  variant={done ? "secondary" : "outline"}
+                                  className="rounded-full"
+                                >
+                                  {done ? "Done" : `${p.minutes} min`}
+                                </Badge>
                               </div>
-                              <Input
-                                inputMode="numeric"
-                                value={metrics.accuracy ?? ""}
-                                onChange={(e) =>
-                                  setProbeMetric(p.id, {
-                                    accuracy: e.target.value
-                                      ? Number(e.target.value)
-                                      : undefined,
-                                  })
-                                }
-                                placeholder="e.g., 70"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="text-xs text-muted-foreground">
-                                Time (min)
-                              </div>
-                              <Input
-                                inputMode="numeric"
-                                value={metrics.time_min ?? ""}
-                                onChange={(e) =>
-                                  setProbeMetric(p.id, {
-                                    time_min: e.target.value
-                                      ? Number(e.target.value)
-                                      : undefined,
-                                  })
-                                }
-                                placeholder="e.g., 15"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="text-xs text-muted-foreground">
-                                Self confidence (1–5)
-                              </div>
-                              <Input
-                                inputMode="numeric"
-                                value={metrics.self_confidence ?? ""}
-                                onChange={(e) =>
-                                  setProbeMetric(p.id, {
-                                    self_confidence: e.target.value
-                                      ? Number(e.target.value)
-                                      : undefined,
-                                  })
-                                }
-                                placeholder="e.g., 4"
-                              />
-                            </div>
-                          </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              <div className="space-y-3">
+                                <div className="text-sm text-muted-foreground">
+                                  Target accuracy:{" "}
+                                  <span className="font-medium text-slate-900">
+                                    {p.targetAccuracy}%
+                                  </span>
+                                </div>
+                                <div className="text-sm text-muted-foreground">
+                                  Why this matters: {p.why}
+                                </div>
 
-                          <div className="flex gap-2">
-                            <Button
-                              type="button"
-                              variant={done ? "secondary" : "default"}
-                              onClick={() => toggleProbeDone(p, !done)}
-                            >
-                              {done ? "Mark as not done" : "Mark as done"}
-                            </Button>
-                          </div>
+                                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                                  {p.instructions.map((t, i) => (
+                                    <li key={i}>{t}</li>
+                                  ))}
+                                </ul>
 
-                          <div className="text-xs text-muted-foreground">
-                            Tip: enter metrics to increase confidence score faster.
-                          </div>
+                                <div className="grid md:grid-cols-3 gap-3">
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-muted-foreground">
+                                      Accuracy (%)
+                                    </div>
+                                    <Input
+                                      inputMode="numeric"
+                                      value={metrics.accuracy ?? ""}
+                                      onChange={(e) =>
+                                        setProbeMetric(p.id, {
+                                          accuracy: e.target.value
+                                            ? Number(e.target.value)
+                                            : undefined,
+                                        })
+                                      }
+                                      placeholder="e.g., 70"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-muted-foreground">
+                                      Time (min)
+                                    </div>
+                                    <Input
+                                      inputMode="numeric"
+                                      value={metrics.time_min ?? ""}
+                                      onChange={(e) =>
+                                        setProbeMetric(p.id, {
+                                          time_min: e.target.value
+                                            ? Number(e.target.value)
+                                            : undefined,
+                                        })
+                                      }
+                                      placeholder="e.g., 15"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-muted-foreground">
+                                      Self confidence (1–5)
+                                    </div>
+                                    <Input
+                                      inputMode="numeric"
+                                      value={metrics.self_confidence ?? ""}
+                                      onChange={(e) =>
+                                        setProbeMetric(p.id, {
+                                          self_confidence: e.target.value
+                                            ? Number(e.target.value)
+                                            : undefined,
+                                        })
+                                      }
+                                      placeholder="e.g., 4"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <Button
+                                    type="button"
+                                    variant={done ? "secondary" : "default"}
+                                    onClick={() => toggleProbeDone(p, !done)}
+                                  >
+                                    {done ? "Mark as not done" : "Mark as done"}
+                                  </Button>
+                                </div>
+
+                                <div className="text-xs text-muted-foreground">
+                                  Tip: enter metrics to increase confidence score faster.
+                                </div>
+                              </div>
+                            </AccordionContent>
+                          </AccordionItem>
+                        );
+                      })}
+                    </Accordion>
+                  </Card>
+
+                  {/* Next mock strategy (existing + behavior tweaks) */}
+                  {!strategyPlan ? (
+                    <Card className="p-5 rounded-2xl space-y-3">
+                      <div className="text-lg font-semibold">📌 Next Mock Strategy</div>
+                      <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                        {nextMockStrategy.map((s: string, i: number) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    </Card>
+                  ) : null}
+
+                  {/* Study plan */}
+                  <Card className="p-5 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-lg font-semibold">🗺️ Weekly Plan</div>
+                        <div className="text-sm text-muted-foreground">
+                          A weekly view first; daily details only when you need them.
                         </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  );
-                })}
-              </Accordion>
-            </Card>
+                      </div>
+                      <Badge variant="secondary" className="rounded-full">
+                        {plannedDays} days
+                      </Badge>
+                    </div>
 
-            {/* Next mock strategy (existing + behavior tweaks) */}
-            {!strategyPlan ? (
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="text-lg font-semibold">📌 Next Mock Strategy</div>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {nextMockStrategy.map((s: string, i: number) => (
-                    <li key={i}>{s}</li>
-                  ))}
-                </ul>
-              </Card>
-            ) : null}
+                    {weeklyPlan.length ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {weeklyPlan.map((week) => (
+                          <div key={week.week} className="rounded-xl border bg-white p-4">
+                            <div className="font-medium">Week {week.week}</div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              Days {week.days[0]}–{week.days[week.days.length - 1]} •{" "}
+                              {week.totalMinutes} min • {week.taskCount} tasks
+                            </div>
+                            {week.focus.length ? (
+                              <div className="text-xs text-muted-foreground mt-2">
+                                Focus: {week.focus.slice(0, 3).join(", ")}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">
+                        No plan generated yet. Re-run analysis after backend update.
+                      </div>
+                    )}
 
-            {/* Study plan */}
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-lg font-semibold">🗺️ Daily Quest Plan</div>
-                  <div className="text-sm text-muted-foreground">
-                    Auto-scaled to your minutes/day and next mock timeline.
-                  </div>
-                </div>
-                <Badge variant="secondary" className="rounded-full">
-                  {plannedDays} days
-                </Badge>
-              </div>
-
-              {adjustedPlan.length ? (
-                <Accordion type="single" collapsible className="w-full">
-                  {adjustedPlan.map((d: any) => (
-                    <AccordionItem key={d.day} value={`day-${d.day}`}>
-                      <AccordionTrigger>
-                        Day {d.day} • {d.focus} • {d.time_minutes} min
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                          {(d.tasks || []).map((t: string, i: number) => (
-                            <li key={i}>{t}</li>
-                          ))}
-                        </ul>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  No plan generated yet. Re-run analysis after backend update.
-                </div>
-              )}
-            </Card>
+                    {adjustedPlan.length ? (
+                      <Accordion type="single" collapsible className="w-full">
+                        <AccordionItem value="daily-plan">
+                          <AccordionTrigger>Show daily detail</AccordionTrigger>
+                          <AccordionContent>
+                            <div className="space-y-2">
+                              {adjustedPlan.map((d: any) => (
+                                <div
+                                  key={d.day}
+                                  className="rounded-lg border bg-white p-3"
+                                >
+                                  <div className="text-sm font-medium">
+                                    Day {d.day} • {d.focus} • {d.time_minutes} min
+                                  </div>
+                                  <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1 mt-2">
+                                    {(d.tasks || []).map((t: string, i: number) => (
+                                      <li key={i}>{t}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ))}
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    ) : null}
+                  </Card>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </TabsContent>
 
           {/* EVIDENCE */}
           <TabsContent value="evidence" className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-lg font-semibold">📈 Learning Curve</div>
-                    <div className="text-sm text-muted-foreground">
-                      Momentum across recent attempts (focus XP proxy).
-                    </div>
-                  </div>
-                  <Badge variant="secondary" className="rounded-full">
-                    {titleCase(insights?.trend || "unknown")}
-                  </Badge>
-                </div>
-
-                {curveValues.length ? (
-                  <div className="space-y-3">
+                <div className="text-lg font-semibold">Outcome deltas (last 3 mocks)</div>
+                {outcomeDeltas.hasEnough ? (
+                  <div className="grid gap-3 text-sm text-muted-foreground">
                     <div className="flex items-center justify-between">
-                      <div className="text-3xl font-bold">
-                        {curveValues[curveValues.length - 1]}
-                      </div>
-                      <Badge
-                        variant={curveDelta >= 0 ? "secondary" : "destructive"}
-                        className="rounded-full"
-                      >
-                        {curveDelta >= 0 ? "+" : ""}
-                        {curveDelta} since start
-                      </Badge>
+                      <span>Score trend</span>
+                      <span className="font-medium text-slate-900">
+                        {outcomeDeltas.scoreDelta != null
+                          ? `${outcomeDeltas.scoreDelta >= 0 ? "+" : ""}${outcomeDeltas.scoreDelta}`
+                          : "—"}
+                      </span>
                     </div>
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      <Badge variant="outline" className="rounded-full">
-                        Rolling score: {learningState?.rollingScorePct ?? "—"}%
-                      </Badge>
-                      <Badge
-                        variant={
-                          scoreDeltaLabel && scoreDeltaLabel.startsWith("+")
-                            ? "secondary"
-                            : "outline"
-                        }
-                        className="rounded-full"
-                      >
-                        Rolling delta: {scoreDeltaLabel ?? "—"}
-                      </Badge>
-                      <Badge variant="outline" className="rounded-full">
-                        Attempts: {learningState?.attemptCount ?? "—"}
-                      </Badge>
+                    <div className="flex items-center justify-between">
+                      <span>Accuracy control</span>
+                      <span className="font-medium text-slate-900">
+                        {outcomeDeltas.accuracyDelta != null
+                          ? `${outcomeDeltas.accuracyDelta >= 0 ? "+" : ""}${outcomeDeltas.accuracyDelta}`
+                          : "—"}
+                      </span>
                     </div>
-                    <svg
-                      viewBox="0 0 260 120"
-                      role="img"
-                      aria-label="Learning curve"
-                      className="w-full h-28"
-                    >
-                      <defs>
-                        <linearGradient
-                          id={curveGradientId}
-                          x1="0"
-                          y1="0"
-                          x2="1"
-                          y2="1"
-                        >
-                          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
-                          <stop offset="100%" stopColor="#ec4899" stopOpacity="0.6" />
-                        </linearGradient>
-                      </defs>
-                      <path
-                        d={curvePath(curveValues, 260, 120, 16)}
-                        fill="none"
-                        stroke={`url(#${curveGradientId})`}
-                        strokeWidth="3"
-                      />
-                    </svg>
+                    <div className="flex items-center justify-between">
+                      <span>Speed stability</span>
+                      <span className="font-medium text-slate-900">
+                        {outcomeDeltas.speedDelta != null
+                          ? `${outcomeDeltas.speedDelta >= 0 ? "+" : ""}${outcomeDeltas.speedDelta}`
+                          : "—"}
+                      </span>
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      {learningCurve.length} mocks • latest signal from your recent runs.
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      {learningCurve.slice(-3).map((point, idx) => (
-                        <Badge key={idx} variant="secondary" className="rounded-full">
-                          Mock {point.index} • {point.xp ?? 0} XP
-                        </Badge>
-                      ))}
+                      Compared against the previous 3 mocks.
                     </div>
                   </div>
                 ) : (
                   <div className="text-sm text-muted-foreground">
-                    Log at least 2 mocks to unlock the curve.
+                    Log at least 6 mocks to unlock outcome deltas.
                   </div>
                 )}
               </Card>
 
               <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-lg font-semibold">🧭 Learning Behavior</div>
-                    <div className="text-sm text-muted-foreground">
-                      Signals your engine is picking up.
-                    </div>
-                  </div>
-                  <Badge variant="secondary" className="rounded-full">
-                    {titleCase(lb?.confidence || "unknown")}
-                  </Badge>
-                </div>
-
-                {lb ? (
-                  <>
-                    <div className="flex flex-wrap gap-2">
-                      {lbChips.map((c, i) => (
-                        <Badge
-                          key={i}
-                          variant={c.variant || "secondary"}
-                          className="rounded-full"
-                        >
-                          {c.label}
+                <div className="text-lg font-semibold">Error taxonomy (faculty lens)</div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  {errorTaxonomy.map((item) => (
+                    <div key={item.key} className="rounded-xl border bg-white p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium text-slate-900">{item.label}</div>
+                        <Badge variant="secondary" className="rounded-full">
+                          {item.value}%
                         </Badge>
-                      ))}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Streak {lb.streak_days} days • {lb.weekly_activity}/wk • ΔXP{" "}
-                      {lb.delta_xp ?? 0}
-                    </div>
-                    {Array.isArray(lb?.evidence) && lb.evidence.length ? (
-                      <div className="text-sm">
-                        <div className="font-medium mb-1">Signal evidence</div>
-                        <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                          {lb.evidence.slice(0, 5).map((note: string, i: number) => (
-                            <li key={i}>{note}</li>
-                          ))}
-                        </ul>
                       </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    Upload a few attempts to unlock behavior signals.
-                  </div>
-                )}
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {item.detail}
+                      </div>
+                      <div className="mt-2">
+                        <Progress value={item.value} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </Card>
             </div>
+
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="evidence-detail">
+                <AccordionTrigger>Show detail</AccordionTrigger>
+                <AccordionContent>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Card className="p-5 rounded-2xl space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-lg font-semibold">📈 Learning Curve</div>
+                          <div className="text-sm text-muted-foreground">
+                            Momentum across recent attempts (focus XP proxy).
+                          </div>
+                        </div>
+                        <Badge variant="secondary" className="rounded-full">
+                          {titleCase(insights?.trend || "unknown")}
+                        </Badge>
+                      </div>
+
+                      {curveValues.length ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="text-3xl font-bold">
+                              {curveValues[curveValues.length - 1]}
+                            </div>
+                            <Badge
+                              variant={curveDelta >= 0 ? "secondary" : "destructive"}
+                              className="rounded-full"
+                            >
+                              {curveDelta >= 0 ? "+" : ""}
+                              {curveDelta} since start
+                            </Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            <Badge variant="outline" className="rounded-full">
+                              Rolling score: {learningState?.rollingScorePct ?? "—"}%
+                            </Badge>
+                            <Badge
+                              variant={
+                                scoreDeltaLabel && scoreDeltaLabel.startsWith("+")
+                                  ? "secondary"
+                                  : "outline"
+                              }
+                              className="rounded-full"
+                            >
+                              Rolling delta: {scoreDeltaLabel ?? "—"}
+                            </Badge>
+                            <Badge variant="outline" className="rounded-full">
+                              Attempts: {learningState?.attemptCount ?? "—"}
+                            </Badge>
+                          </div>
+                          <svg
+                            viewBox="0 0 260 120"
+                            role="img"
+                            aria-label="Learning curve"
+                            className="w-full h-28"
+                          >
+                            <defs>
+                              <linearGradient
+                                id={curveGradientId}
+                                x1="0"
+                                y1="0"
+                                x2="1"
+                                y2="1"
+                              >
+                                <stop
+                                  offset="0%"
+                                  stopColor="#6366f1"
+                                  stopOpacity="0.25"
+                                />
+                                <stop
+                                  offset="100%"
+                                  stopColor="#ec4899"
+                                  stopOpacity="0.6"
+                                />
+                              </linearGradient>
+                            </defs>
+                            <path
+                              d={curvePath(curveValues, 260, 120, 16)}
+                              fill="none"
+                              stroke={`url(#${curveGradientId})`}
+                              strokeWidth="3"
+                            />
+                          </svg>
+                          <div className="text-xs text-muted-foreground">
+                            {learningCurve.length} mocks • latest signal from your recent runs.
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            {learningCurve.slice(-3).map((point, idx) => (
+                              <Badge key={idx} variant="secondary" className="rounded-full">
+                                Mock {point.index} • {point.xp ?? 0} XP
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">
+                          Log at least 2 mocks to unlock the curve.
+                        </div>
+                      )}
+                    </Card>
+
+                    <Card className="p-5 rounded-2xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-lg font-semibold">🧭 Learning Behavior</div>
+                          <div className="text-sm text-muted-foreground">
+                            Signals your engine is picking up.
+                          </div>
+                        </div>
+                        <Badge variant="secondary" className="rounded-full">
+                          {titleCase(lb?.confidence || "unknown")}
+                        </Badge>
+                      </div>
+
+                      {lb ? (
+                        <>
+                          <div className="flex flex-wrap gap-2">
+                            {lbChips.map((c, i) => (
+                              <Badge
+                                key={i}
+                                variant={c.variant || "secondary"}
+                                className="rounded-full"
+                              >
+                                {c.label}
+                              </Badge>
+                            ))}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Streak {lb.streak_days} days • {lb.weekly_activity}/wk • ΔXP{" "}
+                            {lb.delta_xp ?? 0}
+                          </div>
+                          {Array.isArray(lb?.evidence) && lb.evidence.length ? (
+                            <div className="text-sm">
+                              <div className="font-medium mb-1">Signal evidence</div>
+                              <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                                {lb.evidence.slice(0, 5).map((note: string, i: number) => (
+                                  <li key={i}>{note}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">
+                          Upload a few attempts to unlock behavior signals.
+                        </div>
+                      )}
+                    </Card>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </TabsContent>
         </Tabs>
+        </div>
+
+        <NextBestActionRail
+          actions={nextActions}
+          loading={nextActionsLoading}
+          title="Next best action"
+          emptyMessage="Analyze another mock to unlock your next best action."
+          ctaLabel="Jump to Actions"
+          onCtaClick={() => setTabValue("actions")}
+        />
       </div>
     </main>
   );
