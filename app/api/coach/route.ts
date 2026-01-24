@@ -4,7 +4,7 @@ import { CoachRequestSchema, CoachResponseSchema } from "@/lib/contracts";
 import {
   appendCoachMessage,
   createCoachConversation,
-  getAttemptById,
+  getAttemptForUser,
   getCoachConversation,
   getLatestAttemptForExam,
   listActionStatesForAttempt,
@@ -32,8 +32,12 @@ export async function POST(req: Request) {
     return res;
   }
 
-  const attempt = await getAttemptById(parsed.data.attemptId);
-  if (!attempt || String(attempt.userId) !== session.userId) {
+  const attempt = await getAttemptForUser({
+    attemptId: parsed.data.attemptId,
+    userId: session.userId,
+    backfillMissingUserId: true,
+  });
+  if (!attempt) {
     const res = NextResponse.json({ error: "Attempt not found." }, { status: 404 });
     if (session.isNew) attachSessionCookie(res, session);
     return res;

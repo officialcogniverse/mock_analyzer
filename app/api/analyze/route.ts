@@ -10,12 +10,14 @@ import {
   saveStrategyMemorySnapshot,
   updateUserLearningStateFromReport,
   getLatestAttemptForExam,
+  updateAttemptIdentity,
 } from "@/lib/persist";
 import { analyzeViaPython } from "@/lib/pythonClient";
 import { attachSessionCookie, ensureSession } from "@/lib/session";
 import { extractTextFromImages } from "@/lib/extractTextFromImages";
 import { fireAndForgetEvent } from "@/lib/events";
 import { z } from "zod";
+import { normalizeReport } from "@/lib/report";
 
 const intakeSchema = z
   .object({
@@ -42,7 +44,9 @@ const intakeSchema = z
     daily_minutes: z.string().optional(),
     preferred_topics: z.string().optional(),
   })
-  .strict();
+  .passthrough();
+
+const DEV_LOG = process.env.NODE_ENV !== "production";
 
 function normalizeTextFromManual(manual?: Record<string, string>) {
   if (!manual) return "";
@@ -314,7 +318,7 @@ export async function POST(req: Request) {
       ? await analyzeViaPython({ exam: examLabel, intake, text })
       : await analyzeMock({ exam: examLabel, intake, text });
 
-    const report = unwrapReport(rawOut);
+    const report = normalizeReport(unwrapReport(rawOut));
 
     const focusXP = computeFocusXP(report);
     report.meta = report.meta || {};
@@ -323,6 +327,7 @@ export async function POST(req: Request) {
     report.meta.detectedExam = detected || null;
     report.meta.generatedAt = new Date().toISOString();
     report.meta.analyzer_backend = usePython ? "python" : "ts";
+    report.meta.userId = session.userId;
 
     const scaffold = computeSignalScaffold({ intake, report });
     report.meta.strategy = {
@@ -355,6 +360,17 @@ export async function POST(req: Request) {
       rawText: text,
       report,
     });
+
+    await updateAttemptIdentity({ attemptId, userId: session.userId });
+
+    if (DEV_LOG) {
+      console.debug("[api.analyze] attempt saved", {
+        userId: session.userId,
+        attemptId,
+        reportKeys: Object.keys(report || {}),
+        nextActionsCount: Array.isArray(report?.next_actions) ? report.next_actions.length : 0,
+      });
+    }
 
     fireAndForgetEvent({
       userId: session.userId,

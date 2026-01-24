@@ -21,6 +21,7 @@ import { sampleReportPayload } from "@/lib/sampleData";
 import { formatExamLabel } from "@/lib/exams";
 import { trackEvent } from "@/lib/analytics";
 import type { CoachMode } from "@/lib/contracts";
+import { deriveFallbackActions, normalizeReport } from "@/lib/report";
 import {
   fetchWithTimeout,
   isAbortError,
@@ -86,6 +87,7 @@ const SIGNAL_LABELS: Record<string, string> = {
 };
 
 const SIGNAL_TOTAL = 6;
+const DEV_LOG = process.env.NODE_ENV !== "production";
 
 function storageKey(prefix: string, reportId: string) {
   return `${prefix}:${reportId}`;
@@ -320,15 +322,24 @@ export default function ReportPage({
     };
   }, [isSample, reportData?.id]);
 
-  const report = reportData?.report || EMPTY_REPORT;
+  const hasReport = Boolean(reportData?.report);
+  const report = useMemo(
+    () => (hasReport ? normalizeReport(reportData?.report) : EMPTY_REPORT),
+    [hasReport, reportData?.report]
+  );
   const examLabel = formatExamLabel(reportData?.exam);
 
-  const confidenceBand = report?.meta?.strategy?.confidence_band || "low";
-  const confidenceScore = Number.isFinite(Number(report?.meta?.strategy?.confidence_score))
+  const confidenceBand =
+    report?.confidence?.band || report?.meta?.strategy?.confidence_band || "low";
+  const confidenceScore = Number.isFinite(Number(report?.confidence?.score))
+    ? Number(report?.confidence?.score)
+    : Number.isFinite(Number(report?.meta?.strategy?.confidence_score))
     ? Number(report?.meta?.strategy?.confidence_score)
     : null;
 
-  const missingSignals = Array.isArray(report?.meta?.strategy?.missing_signals)
+  const missingSignals = Array.isArray(report?.signal_quality?.missing_signals)
+    ? report.signal_quality.missing_signals
+    : Array.isArray(report?.meta?.strategy?.missing_signals)
     ? report.meta.strategy.missing_signals
     : [];
 
@@ -346,7 +357,7 @@ export default function ReportPage({
     return Math.round((doneCount / actions.length) * 100);
   }, [completedActions, report?.next_actions]);
 
-  const topBottleneck = report?.patterns?.[0]?.title || null;
+  const topBottleneck = report?.primary_bottleneck || report?.patterns?.[0]?.title || null;
   const fastestWin = report?.next_actions?.[0]?.title || null;
 
   const deltaFocus = useMemo(() => {
@@ -358,6 +369,14 @@ export default function ReportPage({
   }, [historyItems]);
 
   const attemptsTracked = historyItems.length;
+  const singleAttemptBaseline = attemptsTracked === 1;
+  const hasNextActions = Array.isArray(report?.next_actions) && report.next_actions.length > 0;
+  const fallbackActions = useMemo(
+    () => (hasNextActions || !hasReport ? [] : deriveFallbackActions(topBottleneck)),
+    [hasNextActions, hasReport, topBottleneck]
+  );
+  const showFallbackActions = hasReport && !hasNextActions && fallbackActions.length > 0;
+  const reportMissing = !loading && !hasReport;
 
   const consistencyScore = confidenceScore;
   const riskScore = confidenceScore != null ? Math.max(0, 100 - confidenceScore) : null;
@@ -413,6 +432,16 @@ export default function ReportPage({
       metadata: { exam: reportData.exam },
     });
   }, [reportData, reportId, isSample]);
+
+  useEffect(() => {
+    if (!DEV_LOG || loading) return;
+    console.debug("[ui.report] report state", {
+      attemptId: reportId,
+      reportLoaded: hasReport,
+      nextActionsCount: report?.next_actions?.length ?? 0,
+      fallbackActions: showFallbackActions ? fallbackActions.length : 0,
+    });
+  }, [reportId, hasReport, report?.next_actions?.length, fallbackActions, showFallbackActions, loading]);
 
   useEffect(() => {
     if (isSample || !reportData?.exam || !strategyProbes.length) return;
@@ -676,13 +705,13 @@ export default function ReportPage({
               />
               <StatPill
                 label="Top bottleneck"
-                value={topBottleneck || "Not enough data yet"}
+                value={topBottleneck || (singleAttemptBaseline ? "Baseline from this attempt" : "Awaiting patterns")}
                 hint="Highest-impact friction from this attempt."
                 tone={topBottleneck ? "warning" : "default"}
               />
               <StatPill
                 label="Fastest win"
-                value={fastestWin || "Not enough data yet"}
+                value={fastestWin || (singleAttemptBaseline ? "Baseline action available" : "Awaiting actions")}
                 hint="Smallest move with the best immediate payoff."
                 tone={fastestWin ? "positive" : "default"}
               />
@@ -717,7 +746,9 @@ export default function ReportPage({
                   </div>
                 ) : (
                   <div className="mt-2 text-sm text-muted-foreground">
-                    Not enough data yet.
+                    {singleAttemptBaseline
+                      ? "Baseline consistency from this attempt."
+                      : "Consistency will appear after a report is generated."}
                   </div>
                 )}
               </div>
@@ -744,7 +775,9 @@ export default function ReportPage({
                   </div>
                 ) : (
                   <div className="mt-2 text-sm text-muted-foreground">
-                    Not enough data yet.
+                    {singleAttemptBaseline
+                      ? "Baseline risk from this attempt."
+                      : "Risk will appear after a report is generated."}
                   </div>
                 )}
               </div>
@@ -801,7 +834,7 @@ export default function ReportPage({
                   <p className="mb-3 text-sm text-muted-foreground">
                     Complete these before the next mock. Progress syncs to your coach and institute.
                   </p>
-                  {report.next_actions?.length ? (
+                  {hasNextActions ? (
                     <div className="space-y-3">
                       {report.next_actions.map((action: any, idx: number) => {
                         const actionId = actionSlug(action?.title, idx);
@@ -864,10 +897,45 @@ export default function ReportPage({
                         );
                       })}
                     </div>
+                  ) : showFallbackActions ? (
+                    <div className="space-y-3">
+                      <EmptyState
+                        title="Baseline actions generated from this attempt"
+                        description="We could not find tailored next actions, so these baseline moves are derived from your primary bottleneck."
+                      />
+                      {fallbackActions.map((action, idx) => (
+                        <div key={`fallback-${action.title}-${idx}`} className="rounded-xl border p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="text-sm font-semibold text-slate-900">
+                                {action.title}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {action.duration} · {action.expected_impact}
+                              </div>
+                            </div>
+                          </div>
+                          {action.steps?.length ? (
+                            <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                              {action.steps.map((step: string, sIdx: number) => (
+                                <li key={`fallback-${action.title}-${sIdx}`}>{step}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : reportMissing ? (
+                    <EmptyState
+                      title="Report missing"
+                      description="Report generation failed for this attempt. Try regenerating it now."
+                      actionLabel="Regenerate report"
+                      onAction={() => router.push("/")}
+                    />
                   ) : (
                     <EmptyState
-                      title="No actions yet"
-                      description="We need clearer patterns to recommend the best next actions."
+                      title="Actions are still generating"
+                      description="If this persists, regenerate the report from the upload page."
                     />
                   )}
                 </AccordionContent>
