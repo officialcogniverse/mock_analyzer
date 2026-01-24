@@ -149,55 +149,139 @@ export default function LandingPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-6">
-      <div className="w-full max-w-5xl grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <Card className="w-full rounded-2xl shadow-lg">
-          <CardContent className="p-8 space-y-6">
-            {/* Header */}
-            <div className="space-y-2 text-center">
-              <h1 className="text-3xl font-bold">Cogniverse</h1>
-              <p className="text-muted-foreground">
-                Turn your mock into a clear improvement plan (built for the next mock)
-              </p>
-            </div>
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 px-6 py-10">
+      <div className="mx-auto w-full max-w-6xl space-y-8">
+        <header className="flex flex-col gap-3 text-center">
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-indigo-500">
+            Cogniverse Student Hub
+          </p>
+          <h1 className="text-4xl font-bold text-slate-900">
+            Your profile, your mock journey, in one calm space
+          </h1>
+          <p className="text-base text-muted-foreground">
+            Track your mock sections, keep every attempt organized, and build a clear plan
+            for the next test.
+          </p>
+        </header>
 
-          {/* Journey CTA (minimal distraction) */}
-          <div className="flex flex-col items-center gap-2 pt-2">
-            <div className="flex flex-wrap justify-center gap-2">
-              <Button variant="secondary" onClick={() => router.push("/history")}>
-                Continue my journey →
-              </Button>
-              <Button variant="outline" onClick={() => router.push("/report/sample")}>
-                View sample report
-              </Button>
-            </div>
+        <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="space-y-6">
+            <Card className="rounded-2xl border border-indigo-100/60 bg-white/80 shadow-sm">
+              <CardContent className="p-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 text-lg font-semibold">
+                    CS
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold">Cogniverse Student</p>
+                    <p className="text-sm text-muted-foreground">
+                      Building mock confidence, one section at a time
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-3 text-sm">
+                  <div className="rounded-lg border bg-white px-3 py-2">
+                    Target exam window: <span className="font-medium">Next 14 days</span>
+                  </div>
+                  <div className="rounded-lg border bg-white px-3 py-2">
+                    Weekly study rhythm: <span className="font-medium">10–20 hours</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={() => router.push("/history")}>
+                    View my timeline →
+                  </Button>
+                  <Button variant="outline" onClick={() => router.push("/report/sample")}>
+                    Sample report
+                  </Button>
+                </div>
+                {lastReportId ? (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/report/${lastReportId}`)}
+                    className="text-xs text-muted-foreground hover:underline"
+                  >
+                    Resume last report
+                  </button>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Tip: analyze 2–3 mocks to unlock stronger learning behavior signals.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-            {lastReportId ? (
-              <button
-                type="button"
-                onClick={() => router.push(`/report/${lastReportId}`)}
-                className="text-xs text-muted-foreground hover:underline"
-              >
-                Resume last report
-              </button>
-            ) : (
-              <div className="text-xs text-muted-foreground">
-                Tip: analyze 2–3 mocks to unlock stronger learning behavior signals.
-              </div>
-            )}
+            <Card className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <CardContent className="p-6 space-y-4">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold">Mock sections</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Keep section-level practice visible and easy to revisit.
+                  </p>
+                </div>
+                <div className="grid gap-3">
+                  {[
+                    {
+                      title: "Quantitative Aptitude",
+                      subtitle: "Accuracy + speed drills",
+                    },
+                    {
+                      title: "Verbal Ability",
+                      subtitle: "RC + vocabulary focus",
+                    },
+                    {
+                      title: "Logical Reasoning",
+                      subtitle: "Pattern recognition + sets",
+                    },
+                  ].map((section) => (
+                    <div
+                      key={section.title}
+                      className="flex items-center justify-between rounded-xl border bg-white px-4 py-3 text-sm"
+                    >
+                      <div>
+                        <p className="font-medium text-slate-900">{section.title}</p>
+                        <p className="text-xs text-muted-foreground">{section.subtitle}</p>
+                      </div>
+                      <Button variant="ghost" className="text-xs">
+                        Open
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <NextBestActionRail
+              actions={sampleNextActions}
+              title="What this feels like"
+              emptyMessage="Sample report shows your next best action."
+              ctaLabel="View sample report"
+              onCtaClick={() => router.push("/report/sample")}
+            />
           </div>
 
-          {/* Progress */}
-          <div className="space-y-2">
-            <Progress value={progress} />
-            <p className="text-sm text-muted-foreground text-right">
-              Step {step} of 2
-            </p>
-          </div>
+          <div className="space-y-6">
+            <Card className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <CardContent className="p-6 space-y-6">
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-semibold text-slate-900">
+                    Build your next mock plan
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Complete the quick setup so your report focuses on the right outcomes.
+                  </p>
+                </div>
 
-          {/* STEP 1 */}
-          {step === 1 && (
-            <div className="space-y-6">
+                <div className="space-y-2">
+                  <Progress value={progress} />
+                  <p className="text-sm text-muted-foreground text-right">
+                    Step {step} of 2
+                  </p>
+                </div>
+
+                {/* STEP 1 */}
+                {step === 1 && (
+                  <div className="space-y-6">
               <div className="space-y-3">
                 <h2 className="text-xl font-semibold flex items-center gap-2">
                   <Target className="w-5 h-5" /> Choose your exam
@@ -291,73 +375,69 @@ export default function LandingPage() {
                 subtitle="We align your plan to the real exam format, timing, and marking."
               />
             </div>
-          )}
+                )}
 
-          {/* STEP 2 */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <Upload className="w-5 h-5" /> Upload your mock result
-              </h2>
+                {/* STEP 2 */}
+                {step === 2 && (
+                  <div className="space-y-4">
+                    <h2 className="text-xl font-semibold flex items-center gap-2">
+                      <Upload className="w-5 h-5" /> Upload your mock result
+                    </h2>
 
-              <div className="rounded-xl border bg-white p-4 space-y-3">
-                <label className="flex items-center gap-2 text-sm font-medium">
-                  <FileText className="h-4 w-4" />
-                  Upload PDF (optional)
-                </label>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
-              </div>
+                    <div className="rounded-xl border bg-white p-4 space-y-3">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <FileText className="h-4 w-4" />
+                        Upload PDF (optional)
+                      </label>
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                      />
+                    </div>
 
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Or paste scorecard/mock text</div>
-                <Textarea
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder="Paste your mock result text here"
-                  className="min-h-[140px]"
-                />
-              </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">
+                        Or paste scorecard/mock text
+                      </div>
+                      <Textarea
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        placeholder="Paste your mock result text here"
+                        className="min-h-[140px]"
+                      />
+                    </div>
 
-              <Button
-                onClick={onAnalyze}
-                disabled={!canAnalyze || loading}
-                className="w-full"
-              >
-                {loading ? "Analyzing..." : "Analyze & Generate Plan 🚀"}
-              </Button>
-            </div>
-          )}
+                    <Button
+                      onClick={onAnalyze}
+                      disabled={!canAnalyze || loading}
+                      className="w-full"
+                    >
+                      {loading ? "Analyzing..." : "Analyze & Generate Plan 🚀"}
+                    </Button>
+                  </div>
+                )}
 
-            {/* Navigation */}
-            <div className="flex justify-between pt-4">
-              <Button
-                variant="ghost"
-                disabled={step === 1}
-                onClick={() => setStep((s) => Math.max(1, s - 1))}
-              >
-                Back
-              </Button>
-              <Button
-                disabled={!canGoNext || step === 2}
-                onClick={() => setStep((s) => Math.min(2, s + 1))}
-              >
-                Next
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <NextBestActionRail
-          actions={sampleNextActions}
-          title="What this feels like"
-          emptyMessage="Sample report shows your next best action."
-          ctaLabel="View sample report"
-          onCtaClick={() => router.push("/report/sample")}
-        />
+                {/* Navigation */}
+                <div className="flex justify-between pt-4">
+                  <Button
+                    variant="ghost"
+                    disabled={step === 1}
+                    onClick={() => setStep((s) => Math.max(1, s - 1))}
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    disabled={!canGoNext || step === 2}
+                    onClick={() => setStep((s) => Math.min(2, s + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </main>
   );
