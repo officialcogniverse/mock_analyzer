@@ -48,7 +48,10 @@ const NormalizedReportSchema = z.object({
   summary: z.string().catch("No summary available yet."),
   patterns: z.array(z.any()).optional(),
   next_actions: z.array(NextActionSchema).default([]),
+
+  // Keeping optional, but we’ll sanitize before parse so wrong types don’t crash
   probes: z.array(z.any()).optional(),
+
   plan: z
     .object({
       days: z.array(z.any()).optional(),
@@ -101,7 +104,12 @@ function pickPrimaryBottleneck(raw: any, meta: any) {
   return topTitle || null;
 }
 
-function actionTemplate(title: string, duration: string, expectedImpact: string, steps: string[]) {
+function actionTemplate(
+  title: string,
+  duration: string,
+  expectedImpact: string,
+  steps: string[]
+) {
   return {
     title,
     duration,
@@ -214,18 +222,26 @@ export function deriveFallbackActions(primaryBottleneck: string | null | undefin
 
 export function normalizeReport(rawReport: any) {
   const raw = rawReport && typeof rawReport === "object" ? rawReport : {};
+
+  // --- META: parse if possible, but never trust unknown shapes ---
   const metaCandidate = raw.meta && typeof raw.meta === "object" ? raw.meta : {};
   const metaParsed = ReportMetaSchema.safeParse(metaCandidate);
   const meta = metaParsed.success ? metaParsed.data : metaCandidate;
 
+  // --- strategy plan compatibility ---
   const strategyPlan = meta?.strategy_plan || raw?.strategy_plan || raw?.strategyPlan || {};
   const confidenceFromStrategy = meta?.strategy || {};
-  const confidenceFromPlan = strategyPlan?.confidence || {};
+  const confidenceFromPlan = (strategyPlan as any)?.confidence || {};
 
   const confidenceScoreRaw =
-    confidenceFromStrategy?.confidence_score ?? confidenceFromPlan?.score ?? raw?.confidence_score;
+    (confidenceFromStrategy as any)?.confidence_score ??
+    (confidenceFromPlan as any)?.score ??
+    raw?.confidence_score;
+
   const confidenceBandRaw =
-    confidenceFromStrategy?.confidence_band ?? confidenceFromPlan?.band ?? raw?.confidence_band;
+    (confidenceFromStrategy as any)?.confidence_band ??
+    (confidenceFromPlan as any)?.band ??
+    raw?.confidence_band;
 
   const confidence = {
     score: Number.isFinite(Number(confidenceScoreRaw)) ? Number(confidenceScoreRaw) : undefined,
@@ -234,44 +250,65 @@ export function normalizeReport(rawReport: any) {
 
   const signalQuality = meta?.signal_quality || computeSignalQuality(meta);
 
+  // --- next actions: accept multiple keys but validate them ---
   const nextActionsSource =
-    raw?.next_actions ?? raw?.nextActions ?? raw?.actions ?? meta?.next_actions ?? [];
+    raw?.next_actions ?? raw?.nextActions ?? raw?.actions ?? (meta as any)?.next_actions ?? [];
 
   const nextActionsParsed = z.array(NextActionSchema).safeParse(nextActionsSource);
   const nextActions = nextActionsParsed.success ? nextActionsParsed.data : [];
 
+  // --- bottleneck ---
   const primaryBottleneck = pickPrimaryBottleneck(raw, meta);
 
-  const planDays = Array.isArray(strategyPlan?.plan_days)
-    ? strategyPlan.plan_days
-    : Array.isArray(strategyPlan?.days)
-    ? strategyPlan.days
+  // --- plan days compatibility ---
+  const planDays = Array.isArray((strategyPlan as any)?.plan_days)
+    ? (strategyPlan as any).plan_days
+    : Array.isArray((strategyPlan as any)?.days)
+    ? (strategyPlan as any).days
     : [];
+
+  // ✅ CRITICAL FIX: sanitize fields that can be the wrong type even if "optional"
+  const patterns = Array.isArray(raw?.patterns) ? raw.patterns : [];
+  const probes = Array.isArray(raw?.probes)
+    ? raw.probes
+    : Array.isArray((meta as any)?.probes)
+    ? (meta as any).probes
+    : [];
+
+  const safeRawMeta = raw?.meta && typeof raw.meta === "object" ? raw.meta : {};
 
   const normalized = NormalizedReportSchema.parse({
     ...raw,
+
+    // override unsafe / commonly-bad fields from ...raw
+    patterns,
+    probes,
+
     next_actions: nextActions,
-    probes: raw?.probes ?? meta?.probes,
+
     plan: {
       days: planDays,
-      levers: Array.isArray(strategyPlan?.top_levers) ? strategyPlan.top_levers : [],
-      rules: Array.isArray(strategyPlan?.if_then_rules) ? strategyPlan.if_then_rules : [],
-      assumptions: Array.isArray(strategyPlan?.confidence?.assumptions)
-        ? strategyPlan.confidence.assumptions
+      levers: Array.isArray((strategyPlan as any)?.top_levers) ? (strategyPlan as any).top_levers : [],
+      rules: Array.isArray((strategyPlan as any)?.if_then_rules)
+        ? (strategyPlan as any).if_then_rules
+        : [],
+      assumptions: Array.isArray((strategyPlan as any)?.confidence?.assumptions)
+        ? (strategyPlan as any).confidence.assumptions
         : [],
     },
+
     confidence,
     signal_quality: signalQuality,
     primary_bottleneck: primaryBottleneck || undefined,
+
     meta: {
-      ...raw?.meta,
+      ...safeRawMeta,
       strategy_plan: strategyPlan,
       signal_quality: signalQuality,
     },
   });
 
   if (DEV_LOG) {
-    // minimal instrumentation for debugging identity/report gaps
     console.debug("[report.normalize]", {
       hasSummary: Boolean(normalized.summary),
       nextActionsCount: normalized.next_actions.length,
