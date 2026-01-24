@@ -44,14 +44,16 @@ export async function POST(req: Request) {
   }
 
   const exam = String(attempt.exam || "GENERIC");
-  const actionTitles = Array.isArray(attempt.report?.next_actions)
-    ? attempt.report.next_actions.map((action: any) => String(action?.title || "").trim()).filter(Boolean)
+  const actionRefs = Array.isArray(attempt.report?.next_actions)
+    ? attempt.report.next_actions
+        .map((action: any) => ({ id: action?.id ? String(action.id) : undefined, title: String(action?.title || "").trim() }))
+        .filter((action: any) => action.title)
     : [];
 
   const actionStates = await listActionStatesForAttempt({
     userId: session.userId,
     attemptId: parsed.data.attemptId,
-    actionTitles,
+    actionRefs,
   });
 
   const previousAttempt = await getLatestAttemptForExam({
@@ -127,7 +129,7 @@ export async function POST(req: Request) {
     role: "coach",
     mode: parsed.data.mode,
     content: reply.answer,
-    citations: reply.citations,
+    citations: reply.citations as any,
     createdAt: new Date(),
   });
 

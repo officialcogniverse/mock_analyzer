@@ -34,7 +34,10 @@ export async function GET(
   const attemptId = rec._id.toString();
   await updateAttemptIdentity({ attemptId, userId: session.userId });
 
-  const normalizedReport = rec.report ? normalizeReport(rec.report) : null;
+  const createdAtIso = rec.createdAt instanceof Date ? rec.createdAt.toISOString() : String(rec.createdAt || new Date().toISOString());
+  const normalizedReport = rec.report
+    ? normalizeReport(rec.report, { userId: session.userId, attemptId, createdAt: createdAtIso })
+    : null;
 
   if (process.env.NODE_ENV !== "production") {
     console.debug("[api.report] report lookup", {
@@ -47,8 +50,7 @@ export async function GET(
 
   const res = NextResponse.json({
     id: attemptId,
-    createdAt:
-      rec.createdAt instanceof Date ? rec.createdAt.toISOString() : String(rec.createdAt || ""),
+    createdAt: createdAtIso,
     exam: rec.exam,
     report: normalizedReport,
   });

@@ -1,3 +1,4 @@
+import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { getDb } from "@/lib/mongo";
 
@@ -19,7 +20,7 @@ export const EventPayloadSchema = z
   .object({
     event_name: EventNameSchema,
     attempt_id: z.string().min(1).optional(),
-    metadata: z.record(z.any()).optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
   })
   .strict();
 
@@ -27,7 +28,7 @@ export type EventName = z.infer<typeof EventNameSchema>;
 export type EventPayload = z.infer<typeof EventPayloadSchema>;
 
 export type EventDoc = {
-  _id?: unknown;
+  _id?: ObjectId;
   event_name: EventName;
   user_id: string;
   attempt_id?: string;

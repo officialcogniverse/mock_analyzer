@@ -49,10 +49,13 @@ type UserDoc = {
   examDefault: string | null;
   auth?: { email?: string | null };
   profile?: {
-    preferredMockDay?: string | null;
-    examAttempt?: string | null;
-    focusArea?: string | null;
-    studyGroup?: string | null;
+    displayName?: string | null;
+    targetExamLabel?: string | null;
+    goal?: GoalApi | null;
+    nextMockDate?: string | null;
+    dailyStudyMinutes?: number | null;
+    biggestStruggle?: string | null;
+    timezone?: string | null;
   };
 };
 
@@ -103,10 +106,12 @@ export default function LandingPage() {
   const [sessionReady, setSessionReady] = useState(false);
   const [user, setUser] = useState<UserDoc | null>(null);
   const [profileName, setProfileName] = useState("");
-  const [preferredMockDay, setPreferredMockDay] = useState("");
-  const [examAttempt, setExamAttempt] = useState("");
-  const [focusArea, setFocusArea] = useState("");
-  const [studyGroup, setStudyGroup] = useState("");
+  const [profileGoal, setProfileGoal] = useState<GoalApi>("score");
+  const [profileTargetExam, setProfileTargetExam] = useState("");
+  const [profileNextMockDate, setProfileNextMockDate] = useState("");
+  const [profileDailyMinutes, setProfileDailyMinutes] = useState("");
+  const [profileStruggle, setProfileStruggle] = useState("");
+  const [profileTimezone, setProfileTimezone] = useState("Asia/Kolkata");
   const [profileSaving, setProfileSaving] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
   const [signInName, setSignInName] = useState("");
@@ -144,11 +149,15 @@ export default function LandingPage() {
         if (!active) return;
         const u = json?.user as UserDoc | null;
         setUser(u || null);
-        setProfileName(u?.displayName || "");
-        setPreferredMockDay(u?.profile?.preferredMockDay || "");
-        setExamAttempt(u?.profile?.examAttempt || "");
-        setFocusArea(u?.profile?.focusArea || "");
-        setStudyGroup(u?.profile?.studyGroup || "");
+        setProfileName(u?.displayName || u?.profile?.displayName || "");
+        setProfileGoal((u?.profile?.goal as GoalApi) || "score");
+        setProfileTargetExam(u?.profile?.targetExamLabel || "");
+        setProfileNextMockDate(u?.profile?.nextMockDate || "");
+        setProfileDailyMinutes(
+          u?.profile?.dailyStudyMinutes ? String(u.profile.dailyStudyMinutes) : ""
+        );
+        setProfileStruggle(u?.profile?.biggestStruggle || "");
+        setProfileTimezone(u?.profile?.timezone || "Asia/Kolkata");
         setSignInName(u?.displayName || "");
         setSignInExam(u?.examDefault || "");
         setAuthEmail(u?.auth?.email || "");
@@ -240,10 +249,13 @@ export default function LandingPage() {
         body: JSON.stringify({
           displayName: profileName,
           profile: {
-            preferredMockDay,
-            examAttempt,
-            focusArea,
-            studyGroup,
+            displayName: profileName,
+            targetExamLabel: profileTargetExam || examLabel || null,
+            goal: profileGoal,
+            nextMockDate: profileNextMockDate || null,
+            dailyStudyMinutes: Number(profileDailyMinutes) || null,
+            biggestStruggle: profileStruggle || null,
+            timezone: profileTimezone || "Asia/Kolkata",
           },
         }),
       });
@@ -294,13 +306,31 @@ export default function LandingPage() {
         body: JSON.stringify({
           displayName: signInName,
           examDefault: signInExam,
+          profile: {
+            displayName: signInName,
+            targetExamLabel: signInExam || profileTargetExam || null,
+            goal: profileGoal,
+            nextMockDate: profileNextMockDate || null,
+            dailyStudyMinutes: Number(profileDailyMinutes) || null,
+            biggestStruggle: profileStruggle || null,
+            timezone: profileTimezone || "Asia/Kolkata",
+          },
         }),
       });
       const profileData = await profileRes.json();
       if (!profileRes.ok) throw new Error(profileData?.error || "Profile update failed");
 
-      setUser(profileData.user || data.user || null);
-      setProfileName(profileData.user?.displayName || "");
+      const nextUser = profileData.user || data.user || null;
+      setUser(nextUser);
+      setProfileName(nextUser?.displayName || nextUser?.profile?.displayName || "");
+      setProfileGoal((nextUser?.profile?.goal as GoalApi) || profileGoal);
+      setProfileTargetExam(nextUser?.profile?.targetExamLabel || signInExam || "");
+      setProfileNextMockDate(nextUser?.profile?.nextMockDate || profileNextMockDate);
+      setProfileDailyMinutes(
+        nextUser?.profile?.dailyStudyMinutes ? String(nextUser.profile.dailyStudyMinutes) : profileDailyMinutes
+      );
+      setProfileStruggle(nextUser?.profile?.biggestStruggle || profileStruggle);
+      setProfileTimezone(nextUser?.profile?.timezone || profileTimezone);
       setSignInOpen(false);
       toast.success("Signed in ✅");
       router.push(authMode === "institute" ? "/institute" : "/history");
@@ -387,9 +417,11 @@ export default function LandingPage() {
       form.append("manual", JSON.stringify(manualPayload));
 
       await trackEvent("attempt_uploaded", {
-        hasText: Boolean(trimmed),
-        filesCount: files.length,
-        hasManual: hasManualSignals,
+        metadata: {
+          hasText: Boolean(trimmed),
+          filesCount: files.length,
+          hasManual: hasManualSignals,
+        },
       });
 
       const res = await fetch("/api/analyze", {
@@ -810,42 +842,67 @@ export default function LandingPage() {
                         <div className="grid gap-3 md:grid-cols-2">
                           <div className="space-y-2">
                             <label className="text-xs font-medium text-muted-foreground">
-                              Preferred mock day
+                              Target exam label
                             </label>
                             <Input
-                              value={preferredMockDay}
-                              onChange={(e) => setPreferredMockDay(e.target.value)}
-                              placeholder="Saturday"
+                              value={profileTargetExam}
+                              onChange={(e) => setProfileTargetExam(e.target.value)}
+                              placeholder="CAT 2026 / NEET 2027"
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-xs font-medium text-muted-foreground">
-                              Attempt label
+                              Profile goal
+                            </label>
+                            <select
+                              value={profileGoal}
+                              onChange={(e) => setProfileGoal(e.target.value as GoalApi)}
+                              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            >
+                              <option value="score">Score lift</option>
+                              <option value="accuracy">Accuracy</option>
+                              <option value="speed">Speed</option>
+                              <option value="concepts">Concept clarity</option>
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-medium text-muted-foreground">
+                              Next mock date
                             </label>
                             <Input
-                              value={examAttempt}
-                              onChange={(e) => setExamAttempt(e.target.value)}
-                              placeholder="1st attempt"
+                              type="date"
+                              value={profileNextMockDate}
+                              onChange={(e) => setProfileNextMockDate(e.target.value)}
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-xs font-medium text-muted-foreground">
-                              Focus area
+                              Daily study minutes
                             </label>
                             <Input
-                              value={focusArea}
-                              onChange={(e) => setFocusArea(e.target.value)}
-                              placeholder="Accuracy under time pressure"
+                              value={profileDailyMinutes}
+                              onChange={(e) => setProfileDailyMinutes(e.target.value)}
+                              placeholder="60"
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-xs font-medium text-muted-foreground">
-                              Study group
+                              Biggest struggle
                             </label>
                             <Input
-                              value={studyGroup}
-                              onChange={(e) => setStudyGroup(e.target.value)}
-                              placeholder="Cogniverse Cohort A"
+                              value={profileStruggle}
+                              onChange={(e) => setProfileStruggle(e.target.value)}
+                              placeholder="Time pressure in section 2"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-medium text-muted-foreground">
+                              Timezone
+                            </label>
+                            <Input
+                              value={profileTimezone}
+                              onChange={(e) => setProfileTimezone(e.target.value)}
+                              placeholder="Asia/Kolkata"
                             />
                           </div>
                         </div>
@@ -855,7 +912,7 @@ export default function LandingPage() {
                             onClick={saveProfile}
                             disabled={profileSaving}
                           >
-                            {profileSaving ? "Saving..." : "Save preferences"}
+                            {profileSaving ? "Saving..." : "Save profile"}
                           </Button>
                         </div>
                       </div>
@@ -1150,7 +1207,7 @@ export default function LandingPage() {
           </Card>
 
           <NextBestActionRail
-            actions={sampleNextActions}
+            actions={sampleNextActions as any}
             title="Next best actions"
             emptyMessage="Sample report shows your next best action."
             ctaLabel="Preview sample report"

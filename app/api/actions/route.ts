@@ -47,14 +47,19 @@ export async function GET(req: Request) {
     return res;
   }
 
-  const actionTitles = Array.isArray(attempt.report?.next_actions)
-    ? attempt.report.next_actions.map((action: any) => String(action?.title || "").trim()).filter(Boolean)
+  const actionRefs = Array.isArray(attempt.report?.next_actions)
+    ? attempt.report.next_actions
+        .map((action: any) => ({
+          id: action?.id ? String(action.id) : undefined,
+          title: String(action?.title || "").trim(),
+        }))
+        .filter((action: any) => action.title)
     : [];
 
   const states = await listActionStatesForAttempt({
     userId: session.userId,
     attemptId,
-    actionTitles,
+    actionRefs,
   });
 
   const res = NextResponse.json({ states });

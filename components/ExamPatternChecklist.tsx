@@ -37,11 +37,11 @@ export function ExamPatternChecklist({
       {items?.length ? (
         <ul className="space-y-2 text-sm text-muted-foreground">
           {items.map((item) => (
-            <li key={item.label} className="flex items-start gap-2">
+            <li key={item.title} className="flex items-start gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 text-indigo-500" />
               <div>
-                <span className="font-medium text-slate-900">{item.label}:</span>{" "}
-                {item.detail}
+                <span className="font-medium text-slate-900">{item.title}:</span>{" "}
+                {item.details}
               </div>
             </li>
           ))}

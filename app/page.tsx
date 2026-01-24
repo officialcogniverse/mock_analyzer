@@ -251,7 +251,7 @@ export default function HomePage() {
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Attempt {attempt.id.slice(-6)}</p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(attempt.createdAt).toLocaleString()} · {attempt.sourceType}
+                        {new Date(attempt.createdAt || attempt.created_at).toLocaleString()} · {attempt.sourceType || attempt.source_type}
                       </p>
                     </div>
                     <Button type="button" variant="outline" onClick={() => router.push(`/attempt/${attempt.id}`)}>

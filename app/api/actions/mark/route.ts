@@ -65,11 +65,11 @@ export async function POST(req: Request) {
   }
 
   const actionState = ActionStateSchema.parse({
-    userId: session.userId,
-    attemptId: parsed.data.attemptId,
-    actionId: parsed.data.actionId,
+    user_id: session.userId,
+    attempt_id: parsed.data.attemptId,
+    action_id: parsed.data.actionId,
     status: parsed.data.status,
-    updatedAt:
+    updated_at:
       doc?.updatedAt instanceof Date ? doc.updatedAt.toISOString() : new Date().toISOString(),
     reflection: doc?.reflection || parsed.data.reflection || undefined,
   });
