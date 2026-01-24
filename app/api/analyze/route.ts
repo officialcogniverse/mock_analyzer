@@ -13,6 +13,7 @@ import {
 import { analyzeViaPython } from "@/lib/pythonClient";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
 import { extractTextFromImages } from "@/lib/extractTextFromImages";
+import { fireAndForgetEvent } from "@/lib/events";
 import { z } from "zod";
 
 const intakeSchema = z
@@ -339,6 +340,32 @@ export async function POST(req: Request) {
       intake,
       rawText: text,
       report,
+    });
+
+    fireAndForgetEvent({
+      userId: session.userId,
+      payload: {
+        event_name: "attempt_uploaded",
+        attempt_id: attemptId,
+        metadata: {
+          exam: examLabel,
+          hasFiles: contentType.includes("multipart/form-data"),
+          hasManualSignals: Boolean(manualText),
+        },
+      },
+    });
+
+    fireAndForgetEvent({
+      userId: session.userId,
+      payload: {
+        event_name: "report_generated",
+        attempt_id: attemptId,
+        metadata: {
+          exam: examLabel,
+          confidence_band: report?.meta?.strategy?.confidence_band,
+          confidence_score: report?.meta?.strategy?.confidence_score,
+        },
+      },
     });
 
     try {
