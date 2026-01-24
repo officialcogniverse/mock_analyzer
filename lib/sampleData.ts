@@ -4,103 +4,79 @@ export const sampleReportPayload = {
   exam: "CAT",
   report: {
     summary:
-      "Your mock shows strong VARC comprehension but time leaks in DILR and QA. The biggest bottleneck is spending too long on mid-level sets, which drags down accuracy and leaves easy points unattempted.",
-    estimated_score: {
-      value: 82,
-      max: 198,
-      range: [78, 88],
-      confidence: "medium",
-      assumptions: [
-        "Section timing inferred from question order.",
-        "Accuracy based on incomplete per-section split.",
+      "Your mock shows strong comprehension but uneven execution under time pressure. The primary leakage is spending too long on mid-difficulty questions, which limits easy wins. Data is partial, so this report uses conservative assumptions.",
+    facts: {
+      metrics: [
+        {
+          label: "Attempted questions",
+          value: "58",
+          evidence: "Attempted: 58",
+        },
+        {
+          label: "Accuracy",
+          value: "62%",
+          evidence: "Accuracy: 62%",
+        },
       ],
+      notes: ["Scorecard text was partial."],
     },
-    strengths: ["Reading comprehension accuracy", "Elimination-based solving"],
-    weaknesses: [
+    inferences: [
       {
-        topic: "DILR set selection",
-        severity: 5,
-        reason: "Spent 18+ minutes on a single complex set.",
-      },
-      {
-        topic: "QA speed traps",
-        severity: 4,
-        reason: "Solved mid-difficulty questions first, missing easy wins.",
-      },
-      {
-        topic: "Late-section accuracy",
-        severity: 3,
-        reason: "Accuracy dipped in final 20% of the mock.",
+        hypothesis: "You over-invest time in mid-level questions before clearing easy wins.",
+        confidence: "medium",
+        evidence: "Partial timing cues + low easy-win volume in text.",
       },
     ],
-    error_types: {
-      conceptual: 28,
-      careless: 22,
-      time: 35,
-      comprehension: 15,
-    },
-    top_actions: [
-      "Do 2 timed DILR sets with 12-min hard stop each, twice this week.",
-      "Complete 20 QA easy wins daily before touching mid-level questions.",
-      "Review all wrong answers and tag them by error type within 24 hours.",
+    patterns: [
+      {
+        title: "Mid-difficulty time sink",
+        evidence: "Long time per question noted in remarks.",
+        impact: "Easy questions remain unattempted late in the mock.",
+        fix: "Adopt a 2-pass rule with a 90-second cap in pass 1.",
+      },
+      {
+        title: "Late-stage accuracy dip",
+        evidence: "Accuracy drops after fatigue cues.",
+        impact: "Negative marking risk in last 20% of the test.",
+        fix: "Add a hard-stop review window in the final 8 minutes.",
+      },
     ],
-    fourteen_day_plan: Array.from({ length: 14 }, (_, idx) => ({
-      day: idx + 1,
-      focus: idx % 2 === 0 ? "DILR + QA speed" : "VARC + review",
-      time_minutes: 40,
-      tasks: [
-        "1 timed section (30–40 min).",
-        "2 mini-drills on weak topics.",
-        "15-min review + error tagging.",
+    next_actions: [
+      {
+        title: "Pass-1 timing cap",
+        duration: "Next 2 mocks",
+        expected_impact: "Reduce time leakage and unlock easy wins.",
+        steps: ["90s cap per question", "Mark and move on", "Return only if time remains"],
+      },
+      {
+        title: "Error log sprint",
+        duration: "30 min today",
+        expected_impact: "Fix top mistake bucket before next mock.",
+        steps: ["Tag last 10 errors", "Pick top 1 bucket", "Drill 12 targeted items"],
+      },
+    ],
+    strategy: {
+      next_mock_script: [
+        "Pass 1: scan all sections, capture only sure wins.",
+        "Hard stop at 90 seconds per item in pass 1.",
+        "Final 8 minutes = accuracy audit + marked items only.",
       ],
-    })),
-    next_mock_strategy: [
-      "Start with two easiest sets; hard stop at 12 minutes per set.",
-      "Reserve final 10 minutes for accuracy check and marked questions.",
+      attempt_rules: [
+        "Skip immediately if two steps don’t resolve in 30 seconds.",
+        "No blind guesses in last 5 minutes.",
+      ],
+    },
+    followups: [
+      {
+        id: "next_mock_date",
+        question: "When is your next mock (approx date)?",
+        type: "text",
+        reason: "Plan length depends on your timeline.",
+      },
     ],
     meta: {
       engine: "sample",
-      prompt_version: "sample-v1",
-      strategy_plan: {
-        confidence: {
-          score: 72,
-          band: "medium",
-          assumptions: ["Section timing inferred from attempt order."],
-          missing_signals: ["Exact question-level timestamps"],
-        },
-        top_levers: [
-          {
-            title: "DILR set selection discipline",
-            do: [
-              "Scan all sets in 3 minutes and shortlist 2.",
-              "Hard stop at 12 minutes if no progress.",
-            ],
-            stop: ["Chasing complex sets past 12 minutes."],
-            why: "Your DILR time sink is the biggest score drag.",
-            metric: "Attempted sets with hard stop",
-            next_mock_rule: "Max 2 sets before minute 30.",
-          },
-          {
-            title: "QA easy-first sequencing",
-            do: ["Solve easy wins in first 12 minutes.", "Mark mid-level for later."],
-            stop: ["Starting with time-heavy mid-level questions."],
-            why: "You missed easy questions due to early time leakage.",
-            metric: "Easy questions attempted before minute 15",
-            next_mock_rule: "Complete 8 easy wins before mid-level.",
-          },
-        ],
-        if_then_rules: [
-          "If you miss 3 QA questions in a row, switch to easy bank.",
-          "If DILR set hits 12 minutes, move on immediately.",
-        ],
-        next_questions: [
-          {
-            id: "calc_speed",
-            question: "How many QA questions do you solve in 10 minutes?",
-            options: ["2–3", "4–5", "6+"],
-          },
-        ],
-      },
+      prompt_version: "sample-v2",
     },
   },
 };
@@ -120,130 +96,28 @@ export const sampleInsights = {
   ],
   learning_behavior: {
     cadence: "steady",
-    streak_days: 3,
-    weekly_activity: 2,
-    responsiveness: "improving",
+    streak_days: 4,
+    weekly_activity: 3,
+    responsiveness: "medium",
     delta_xp: 6,
     stuck_loop: { active: false, topic: null },
-    execution_style: "speed_over_control",
-    confidence: "medium",
-    evidence: [
-      "Consistent weekly cadence in the last 14 days.",
-      "XP improved by 6 points compared to earlier mocks.",
-    ],
+    execution_style: "methodical",
+    confidence: "steady",
+    evidence: ["Consistent weekly practice cadence."],
   },
-};
-
-export const sampleLearningState = {
-  attemptCount: 4,
-  rollingScorePct: 68,
-  lastDeltaScorePct: 4,
-  rollingDeltaScorePct: 3,
-  weakTopics: ["DILR set selection", "QA speed traps"],
-  strategyConfidenceBand: "medium",
 };
 
 export const sampleNextActions = [
   {
-    id: "dilr-selection",
-    title: "Lock a 12-min hard stop per DILR set",
-    steps: ["Scan sets in 3 minutes", "Attempt only 2 best-fit sets"],
-    metric: "Sets stopped at 12 minutes",
+    id: "pass-1",
+    title: "Pass-1 timebox",
+    steps: ["90s cap per question", "Mark & move"],
+    metric: "<= 90s avg in pass 1",
     expectedImpact: "High",
-    effort: "20 min",
-    evidence: ["Time spikes in DILR", "Late-section panic signal"],
-    why: "Hard stops prevent time leaks and protect easy marks.",
-    duration: "20 min",
+    effort: "Medium",
+    evidence: ["Time leakage noted in remarks."],
+    why: "Protect easy wins and reduce late-stage panic.",
+    duration: "Next 2 mocks",
     difficulty: "Medium",
-  },
-  {
-    id: "qa-easy-first",
-    title: "Solve 8 easy QA questions before mid-levels",
-    steps: ["Tag easy wins in practice", "Stick to the order in mock"],
-    metric: "Easy-first completion rate",
-    expectedImpact: "Medium",
-    effort: "25 min",
-    evidence: ["Missed easy wins", "Accuracy dip in final 20%"],
-    why: "Easy wins build momentum and stabilize accuracy.",
-    duration: "25 min",
-    difficulty: "Medium",
-  },
-  {
-    id: "review-errors",
-    title: "Review wrong answers within 24 hours",
-    steps: ["Tag each error type", "Write 1 fix note"],
-    metric: "Errors reviewed same day",
-    expectedImpact: "Medium",
-    effort: "15 min",
-    evidence: ["Careless errors at 22%"],
-    why: "Same-day review converts mistakes into rules quickly.",
-    duration: "15 min",
-    difficulty: "Easy",
-  },
-];
-
-export const sampleProgressDoc = {
-  exam: "CAT",
-  nextMockInDays: 7,
-  minutesPerDay: 40,
-  probes: [],
-  confidence: 62,
-  probeMetrics: {},
-};
-
-export const sampleHistoryItems = [
-  {
-    id: "sample-6",
-    exam: "CAT",
-    createdAt: new Date(Date.now() - 86400000 * 35).toISOString(),
-    summary: "Mock",
-    focusXP: 46,
-    estimatedScore: 66,
-    errorTypes: { conceptual: 40, careless: 30, time: 20, comprehension: 10 },
-  },
-  {
-    id: "sample-5",
-    exam: "CAT",
-    createdAt: new Date(Date.now() - 86400000 * 28).toISOString(),
-    summary: "Mock",
-    focusXP: 49,
-    estimatedScore: 68,
-    errorTypes: { conceptual: 38, careless: 30, time: 22, comprehension: 10 },
-  },
-  {
-    id: "sample-4",
-    exam: "CAT",
-    createdAt: new Date().toISOString(),
-    summary: "Latest mock",
-    focusXP: 72,
-    estimatedScore: 82,
-    errorTypes: { conceptual: 28, careless: 22, time: 35, comprehension: 15 },
-  },
-  {
-    id: "sample-3",
-    exam: "CAT",
-    createdAt: new Date(Date.now() - 86400000 * 7).toISOString(),
-    summary: "Mock",
-    focusXP: 66,
-    estimatedScore: 78,
-    errorTypes: { conceptual: 30, careless: 25, time: 30, comprehension: 15 },
-  },
-  {
-    id: "sample-2",
-    exam: "CAT",
-    createdAt: new Date(Date.now() - 86400000 * 14).toISOString(),
-    summary: "Mock",
-    focusXP: 60,
-    estimatedScore: 74,
-    errorTypes: { conceptual: 34, careless: 28, time: 26, comprehension: 12 },
-  },
-  {
-    id: "sample-1",
-    exam: "CAT",
-    createdAt: new Date(Date.now() - 86400000 * 21).toISOString(),
-    summary: "Mock",
-    focusXP: 52,
-    estimatedScore: 70,
-    errorTypes: { conceptual: 36, careless: 30, time: 22, comprehension: 12 },
   },
 ];

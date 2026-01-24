@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { EXAMS, normalizeExam, type Exam } from "@/lib/exams";
+import { normalizeExam } from "@/lib/exams";
 import { listAttempts, upsertUser } from "@/lib/persist";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
 
 export const runtime = "nodejs";
-
-type ExamKey = Exam;
 
 export async function GET(req: Request) {
   const session = ensureUserId(req);
@@ -17,11 +15,8 @@ export async function GET(req: Request) {
     const limit = Math.min(Number(url.searchParams.get("limit") || "20"), 50);
     const exam = normalizeExam(url.searchParams.get("exam") || "");
 
-    // listAttempts returns all exams; filter here (v1)
+    // listAttempts returns all attempts
     const rows = await listAttempts(session.userId, limit);
-    const rows3 = rows.filter((x: any) =>
-      EXAMS.includes(String(x.exam || "").toUpperCase() as Exam)
-    );
 
 
     const items = exam
@@ -29,7 +24,7 @@ export async function GET(req: Request) {
       : rows;
 
     // Useful meta for "Continue journey" per exam
-    const latestByExam: Partial<Record<ExamKey, string>> = {};
+    const latestByExam: Record<string, string> = {};
     for (const it of rows) {
       const ex = normalizeExam(it?.exam);
       if (!ex) continue;

@@ -6,7 +6,7 @@ export type { Insight, NextAction, Report } from "./schema";
  */
 export type Intake = {
   goal: "score" | "accuracy" | "speed" | "concepts";
-  hardest: "selection" | "time" | "concepts" | "careless" | "anxiety";
+  hardest: "selection" | "time" | "concepts" | "careless" | "anxiety" | "consistency";
   weekly_hours: "<10" | "10-20" | "20-35" | "35+";
   section?: string;
 
@@ -16,13 +16,16 @@ export type Intake = {
    * They should NEVER be required.
    */
   next_mock_days?: "3" | "7" | "14" | "21" | "30+";
+  next_mock_date?: string;
   runs_out_of_time?: "yes" | "no";
   tukka_level?: "low" | "medium" | "high";
   chaotic_section?: string;
+  daily_minutes?: string;
+  preferred_topics?: string;
 };
 
 export type AnalyzeInput = {
-  exam: Exam;
+  exam: string;
   intake: Intake;
   text: string;
 };

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,15 +20,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { EXAMS, type Exam } from "@/lib/exams";
 import { ensureSession } from "@/lib/userClient";
 import { NextBestActionRail } from "@/components/next-best-action-rail";
 import { cn } from "@/lib/utils";
+import { trackEvent } from "@/lib/analytics";
 import {
   Upload,
   Target,
   Clock,
-  Brain,
   FileText,
   Users,
   ShieldCheck,
@@ -36,13 +36,12 @@ import {
   ArrowRight,
   Sparkles,
 } from "lucide-react";
-import { ExamPatternChecklist } from "@/components/ExamPatternChecklist";
 import { sampleNextActions } from "@/lib/sampleData";
 
 type GoalUI = "percentile" | "accuracy" | "speed" | "weak_topics";
 type GoalApi = "score" | "accuracy" | "speed" | "concepts";
 
-type Struggle = "selection" | "time" | "concepts" | "careless" | "anxiety";
+type Struggle = "selection" | "time" | "concepts" | "careless" | "anxiety" | "consistency";
 
 type UserDoc = {
   _id: string;
@@ -67,11 +66,21 @@ function mapStruggleToApi(struggle: Struggle) {
   return struggle;
 }
 
-function formatFileSize(file?: File | null) {
-  if (!file) return "";
-  const size = file.size / 1024;
-  if (size < 1024) return `${Math.round(size)} KB`;
-  return `${(size / 1024).toFixed(1)} MB`;
+function weeklyHoursFromDaily(minutes: string) {
+  const numeric = Number(String(minutes || "").replace(/[^0-9.]/g, ""));
+  if (!Number.isFinite(numeric)) return "<10" as const;
+  const weekly = numeric * 7;
+  if (weekly < 10 * 60) return "<10" as const;
+  if (weekly < 20 * 60) return "10-20" as const;
+  if (weekly < 35 * 60) return "20-35" as const;
+  return "35+" as const;
+}
+
+function formatFileSize(files: File[]) {
+  if (!files.length) return "";
+  const total = files.reduce((sum, file) => sum + file.size, 0) / 1024;
+  if (total < 1024) return `${Math.round(total)} KB`;
+  return `${(total / 1024).toFixed(1)} MB`;
 }
 
 function formatAnalyzeError(message?: string) {
@@ -152,14 +161,25 @@ export default function LandingPage() {
 
   const [step, setStep] = useState(1);
 
-  const [exam, setExam] = useState<Exam | null>(null);
-  const [goal, setGoal] = useState<GoalUI | null>(null);
+  const [examLabel, setExamLabel] = useState("");
+  const [goal, setGoal] = useState<GoalUI>("percentile");
   const [struggle, setStruggle] = useState<Struggle | null>(null);
+  const [nextMockDate, setNextMockDate] = useState("");
+  const [dailyMinutes, setDailyMinutes] = useState("");
+  const [preferredTopics, setPreferredTopics] = useState("");
 
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [text, setText] = useState("");
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualMetrics, setManualMetrics] = useState({
+    totalScore: "",
+    accuracy: "",
+    attempts: "",
+    weakAreas: "",
+  });
   const [loading, setLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const [lastReportId, setLastReportId] = useState<string | null>(null);
   useEffect(() => {
@@ -170,20 +190,37 @@ export default function LandingPage() {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const seen = localStorage.getItem("cogniverse_onboarding_done");
+      if (!seen) setShowOnboarding(true);
+    } catch {}
+  }, []);
+
   const progress = useMemo(() => (step / 2) * 100, [step]);
 
   const displayName = user?.displayName || profileName || "Cogniverse Student";
   const examDefault = user?.examDefault || signInExam;
 
   const canGoNext = useMemo(() => {
-    if (step === 1) return !!exam && !!goal && !!struggle;
+    if (step === 1) return !!struggle && !!nextMockDate && !!dailyMinutes;
     if (step === 2) return true;
     return false;
-  }, [step, exam, goal, struggle]);
+  }, [step, struggle, nextMockDate, dailyMinutes]);
+
+  const hasManualSignals =
+    !!manualMetrics.totalScore ||
+    !!manualMetrics.accuracy ||
+    !!manualMetrics.attempts ||
+    !!manualMetrics.weakAreas;
 
   const canAnalyze = useMemo(() => {
-    return !!exam && !!goal && !!struggle && (text.trim().length > 40 || !!file);
-  }, [exam, goal, struggle, text, file]);
+    return (
+      !!struggle &&
+      (text.trim().length > 20 || files.length > 0 || hasManualSignals)
+    );
+  }, [struggle, text, files, hasManualSignals]);
 
   const choiceBtn = (active: boolean) => (active ? "default" : "outline");
 
@@ -292,7 +329,7 @@ export default function LandingPage() {
   }
 
   async function onAnalyze() {
-    if (!canAnalyze || !exam || !goal || !struggle) return;
+    if (!canAnalyze || !goal || !struggle) return;
 
     if (!sessionReady) {
       toast.error("Session not ready. Please refresh once.");
@@ -304,17 +341,36 @@ export default function LandingPage() {
       const intake = {
         goal: mapGoalToApi(goal),
         hardest: mapStruggleToApi(struggle),
-        weekly_hours: "10-20" as const,
+        weekly_hours: weeklyHoursFromDaily(dailyMinutes),
+        next_mock_date: nextMockDate,
+        daily_minutes: dailyMinutes,
+        preferred_topics: preferredTopics || undefined,
       };
 
       const form = new FormData();
-      form.append("exam", exam);
+      if (examLabel.trim()) form.append("exam", examLabel.trim());
       form.append("intake", JSON.stringify(intake));
 
       const trimmed = text.trim();
       if (trimmed) form.append("text", trimmed);
 
-      if (file) form.append("file", file);
+      if (files.length) {
+        files.forEach((f) => form.append("files", f));
+      }
+
+      const manualPayload = {
+        total_score: manualMetrics.totalScore,
+        accuracy: manualMetrics.accuracy,
+        attempts: manualMetrics.attempts,
+        weak_areas: manualMetrics.weakAreas,
+      };
+      form.append("manual", JSON.stringify(manualPayload));
+
+      await trackEvent("attempt_uploaded", {
+        hasText: Boolean(trimmed),
+        filesCount: files.length,
+        hasManual: hasManualSignals,
+      });
 
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -324,13 +380,6 @@ export default function LandingPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        if (data?.detectedExam && typeof data.detectedExam === "string") {
-          const detected = data.detectedExam as Exam;
-          setExam(detected);
-          toast.message(`Detected ${detected} scorecard — switched exam ✅`);
-          return;
-        }
-
         toast.error(formatAnalyzeError(data?.error));
         return;
       }
@@ -341,6 +390,8 @@ export default function LandingPage() {
           setLastReportId(String(data.id));
         }
       } catch {}
+
+      await trackEvent("report_generated", { attemptId: data.id });
 
       toast.success("Report ready 🚀");
       router.push(`/report/${data.id}`);
@@ -368,8 +419,17 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3 text-sm">
-              <Button variant="ghost" onClick={() => router.push("/history")}>
-                History
+              <Button variant="ghost" asChild>
+                <Link href="/history">History</Link>
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/institute">Institute</Link>
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/pricing">Pricing</Link>
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/privacy">Trust</Link>
               </Button>
               <Button variant="ghost" onClick={() => router.push("/report/sample")}>
                 Sample report
@@ -423,11 +483,11 @@ export default function LandingPage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <div className="text-sm font-medium">Default exam</div>
+                      <div className="text-sm font-medium">Default exam metadata</div>
                       <Input
                         value={signInExam}
                         onChange={(e) => setSignInExam(e.target.value)}
-                        placeholder="CAT / JEE / NEET"
+                        placeholder="CAT / Semester 3 / Mock A"
                       />
                     </div>
                     <Button
@@ -512,6 +572,33 @@ export default function LandingPage() {
                   }
                 />
 
+                {showOnboarding ? (
+                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 text-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-indigo-900">
+                        First time here? 3-step quick start
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setShowOnboarding(false);
+                          try {
+                            localStorage.setItem("cogniverse_onboarding_done", "true");
+                          } catch {}
+                        }}
+                      >
+                        Got it
+                      </Button>
+                    </div>
+                    <ol className="mt-3 list-decimal space-y-1 pl-4 text-indigo-900/80">
+                      <li>Add your timeline + daily study minutes.</li>
+                      <li>Upload a scorecard or screenshots (or paste text).</li>
+                      <li>Get coach-style summary, patterns, and next mock script.</li>
+                    </ol>
+                  </div>
+                ) : null}
+
                 <div className="space-y-2">
                   <Progress value={progress} />
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -527,56 +614,21 @@ export default function LandingPage() {
                   <div className="space-y-5">
                     <div className="space-y-3">
                       <h3 className="text-base font-semibold flex items-center gap-2">
-                        <Target className="w-5 h-5" /> Choose your exam
+                        <Target className="w-5 h-5" /> Exam metadata (optional)
                       </h3>
-                      <div className="grid grid-cols-3 gap-2">
-                        {EXAMS.map((item) => (
-                          <Button
-                            key={item}
-                            variant={choiceBtn(exam === item)}
-                            onClick={() => setExam(item)}
-                          >
-                            {item}
-                          </Button>
-                        ))}
-                      </div>
+                      <Input
+                        value={examLabel}
+                        onChange={(e) => setExamLabel(e.target.value)}
+                        placeholder="CAT / JEE / Semester 3 / Mock A"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        This is used only as metadata so reports stay exam-agnostic.
+                      </p>
                     </div>
 
                     <div className="space-y-3">
                       <h3 className="text-base font-semibold flex items-center gap-2">
-                        <Brain className="w-5 h-5" /> Your next 2-week goal
-                      </h3>
-                      <div className="grid gap-2">
-                        <Button
-                          variant={choiceBtn(goal === "percentile")}
-                          onClick={() => setGoal("percentile")}
-                        >
-                          Improve percentile 🚀
-                        </Button>
-                        <Button
-                          variant={choiceBtn(goal === "accuracy")}
-                          onClick={() => setGoal("accuracy")}
-                        >
-                          Improve accuracy 🎯
-                        </Button>
-                        <Button
-                          variant={choiceBtn(goal === "speed")}
-                          onClick={() => setGoal("speed")}
-                        >
-                          Improve speed ⚡
-                        </Button>
-                        <Button
-                          variant={choiceBtn(goal === "weak_topics")}
-                          onClick={() => setGoal("weak_topics")}
-                        >
-                          Strengthen weak topics 📚
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <h3 className="text-base font-semibold flex items-center gap-2">
-                        <Clock className="w-5 h-5" /> Where do you lose marks?
+                        <Clock className="w-5 h-5" /> Biggest struggle right now
                       </h3>
                       <div className="grid gap-2">
                         <Button
@@ -609,6 +661,35 @@ export default function LandingPage() {
                         >
                           Anxiety / panic
                         </Button>
+                        <Button
+                          variant={choiceBtn(struggle === "consistency")}
+                          onClick={() => setStruggle("consistency")}
+                        >
+                          Consistency / momentum dips
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Next mock date
+                        </label>
+                        <Input
+                          value={nextMockDate}
+                          onChange={(e) => setNextMockDate(e.target.value)}
+                          placeholder="e.g. 12 Oct or next Sunday"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Daily study minutes
+                        </label>
+                        <Input
+                          value={dailyMinutes}
+                          onChange={(e) => setDailyMinutes(e.target.value)}
+                          placeholder="45"
+                        />
                       </div>
                     </div>
 
@@ -617,6 +698,47 @@ export default function LandingPage() {
                         Advanced context (optional)
                       </summary>
                       <div className="mt-4 space-y-4">
+                        <div className="space-y-3">
+                          <h4 className="text-sm font-semibold text-slate-900">
+                            Goal focus
+                          </h4>
+                          <div className="grid gap-2">
+                            <Button
+                              variant={choiceBtn(goal === "percentile")}
+                              onClick={() => setGoal("percentile")}
+                            >
+                              Improve score percentile 🚀
+                            </Button>
+                            <Button
+                              variant={choiceBtn(goal === "accuracy")}
+                              onClick={() => setGoal("accuracy")}
+                            >
+                              Improve accuracy 🎯
+                            </Button>
+                            <Button
+                              variant={choiceBtn(goal === "speed")}
+                              onClick={() => setGoal("speed")}
+                            >
+                              Improve speed ⚡
+                            </Button>
+                            <Button
+                              variant={choiceBtn(goal === "weak_topics")}
+                              onClick={() => setGoal("weak_topics")}
+                            >
+                              Strengthen weak topics 📚
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Preferred topics / modules
+                          </label>
+                          <Input
+                            value={preferredTopics}
+                            onChange={(e) => setPreferredTopics(e.target.value)}
+                            placeholder="Algebra, Reading Comprehension"
+                          />
+                        </div>
                         <div className="grid gap-3 md:grid-cols-2">
                           <div className="space-y-2">
                             <label className="text-xs font-medium text-muted-foreground">
@@ -630,7 +752,7 @@ export default function LandingPage() {
                           </div>
                           <div className="space-y-2">
                             <label className="text-xs font-medium text-muted-foreground">
-                              Exam attempt
+                              Attempt label
                             </label>
                             <Input
                               value={examAttempt}
@@ -645,7 +767,7 @@ export default function LandingPage() {
                             <Input
                               value={focusArea}
                               onChange={(e) => setFocusArea(e.target.value)}
-                              placeholder="VARC accuracy"
+                              placeholder="Accuracy under time pressure"
                             />
                           </div>
                           <div className="space-y-2">
@@ -659,11 +781,6 @@ export default function LandingPage() {
                             />
                           </div>
                         </div>
-                        <ExamPatternChecklist
-                          exam={exam}
-                          title="Exam pattern checklist"
-                          subtitle="We align your plan to real exam format, timing, and marking."
-                        />
                         <div className="flex flex-wrap gap-2">
                           <Button
                             variant="secondary"
@@ -685,8 +802,8 @@ export default function LandingPage() {
                         <Upload className="w-5 h-5" /> Upload your mock
                       </h3>
                       <p className="text-xs text-muted-foreground">
-                        PDF scorecard or pasted text works. We only use your mock to
-                        generate your plan.
+                        PDF, screenshots, or pasted text works. We only use your mock
+                        to generate your plan.
                       </p>
                     </div>
 
@@ -705,31 +822,34 @@ export default function LandingPage() {
                       onDrop={(event) => {
                         event.preventDefault();
                         setIsDragging(false);
-                        const dropped = event.dataTransfer.files?.[0];
-                        if (dropped) setFile(dropped);
+                        const dropped = Array.from(event.dataTransfer.files || []);
+                        if (dropped.length) setFiles(dropped);
                       }}
                     >
                       <input
                         id="mock-upload"
                         type="file"
                         className="sr-only"
-                        accept="application/pdf"
-                        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                        accept="application/pdf,image/*"
+                        multiple
+                        onChange={(e) => setFiles(Array.from(e.target.files || []))}
                       />
                       <label htmlFor="mock-upload" className="cursor-pointer space-y-2">
                         <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
                           <FileText className="h-5 w-5" />
                         </div>
                         <p className="text-sm font-medium text-slate-900">
-                          Drag & drop your PDF here, or click to upload
+                          Drag & drop PDFs or screenshots, or click to upload
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          PDF only · Best results under 10 MB
+                          PDF or images · Best results under 10 MB
                         </p>
                       </label>
-                      {file ? (
+                      {files.length ? (
                         <div className="mt-3 text-xs text-muted-foreground">
-                          Selected: <span className="font-medium">{file.name}</span> · {formatFileSize(file)}
+                          Selected:{" "}
+                          <span className="font-medium">{files.length} files</span> ·{" "}
+                          {formatFileSize(files)}
                         </div>
                       ) : null}
                     </div>
@@ -742,7 +862,97 @@ export default function LandingPage() {
                         placeholder="Paste your mock result text here"
                         className="min-h-[140px]"
                       />
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>No text available?</span>
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="px-1 text-xs"
+                          onClick={() => setManualOpen(true)}
+                        >
+                          Enter key metrics manually
+                        </Button>
+                      </div>
                     </div>
+
+                    <Dialog open={manualOpen} onOpenChange={setManualOpen}>
+                      <DialogContent className="sm:max-w-[520px]">
+                        <DialogHeader>
+                          <DialogTitle>Manual fallback entry</DialogTitle>
+                        </DialogHeader>
+                        <div className="grid gap-4">
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium text-muted-foreground">
+                                Total score
+                              </label>
+                              <Input
+                                value={manualMetrics.totalScore}
+                                onChange={(e) =>
+                                  setManualMetrics((prev) => ({
+                                    ...prev,
+                                    totalScore: e.target.value,
+                                  }))
+                                }
+                                placeholder="e.g. 82/198"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium text-muted-foreground">
+                                Accuracy
+                              </label>
+                              <Input
+                                value={manualMetrics.accuracy}
+                                onChange={(e) =>
+                                  setManualMetrics((prev) => ({
+                                    ...prev,
+                                    accuracy: e.target.value,
+                                  }))
+                                }
+                                placeholder="e.g. 62%"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium text-muted-foreground">
+                                Attempts
+                              </label>
+                              <Input
+                                value={manualMetrics.attempts}
+                                onChange={(e) =>
+                                  setManualMetrics((prev) => ({
+                                    ...prev,
+                                    attempts: e.target.value,
+                                  }))
+                                }
+                                placeholder="e.g. 58 attempted"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium text-muted-foreground">
+                                Weak areas
+                              </label>
+                              <Input
+                                value={manualMetrics.weakAreas}
+                                onChange={(e) =>
+                                  setManualMetrics((prev) => ({
+                                    ...prev,
+                                    weakAreas: e.target.value,
+                                  }))
+                                }
+                                placeholder="e.g. algebra, inference RC"
+                              />
+                            </div>
+                          </div>
+                          <Button onClick={() => setManualOpen(false)}>Save manual input</Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+
+                    {hasManualSignals ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        Manual metrics added. We&apos;ll combine them with any uploaded files.
+                      </div>
+                    ) : null}
 
                     <Button
                       onClick={onAnalyze}
@@ -798,7 +1008,7 @@ export default function LandingPage() {
             {
               title: "Profile-first onboarding",
               description:
-                "Capture exam targets, timing preferences, and study cadence in a structured profile.",
+                "Capture target scores, timing preferences, and study cadence in a structured profile.",
               icon: <Users className="h-5 w-5" />,
             },
             {
@@ -852,14 +1062,14 @@ export default function LandingPage() {
                 <div>
                   <p className="text-lg font-semibold">{displayName}</p>
                   <p className="text-sm text-muted-foreground">
-                    {examDefault ? `${examDefault} · ` : ""}Target percentile 95+
+                    {examDefault ? `${examDefault} · ` : ""}Target improvement: +12 points
                   </p>
                 </div>
               </div>
               <Separator />
               <div className="grid gap-3 text-sm">
                 <div className="rounded-lg border bg-white px-3 py-2">
-                  Target exam window: <span className="font-medium">Next 14 days</span>
+                  Next mock window: <span className="font-medium">Next 14 days</span>
                 </div>
                 <div className="rounded-lg border bg-white px-3 py-2">
                   Weekly study rhythm: <span className="font-medium">10–20 hours</span>

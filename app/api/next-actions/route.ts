@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { EXAMS } from "@/lib/exams";
+import { normalizeExam } from "@/lib/exams";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
 import {
   getLatestAttemptForExam,
@@ -11,7 +11,7 @@ import {
 
 export const runtime = "nodejs";
 
-const examSchema = z.enum(EXAMS);
+const examSchema = z.string().optional();
 
 type NextAction = {
   id: string;
@@ -91,18 +91,8 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
 
   const examRaw = url.searchParams.get("exam") || "";
-  const parsed = examSchema.safeParse(String(examRaw).toUpperCase());
-
-  if (!parsed.success) {
-    const res = NextResponse.json(
-      { error: `Missing/invalid exam. Use ?exam=${EXAMS.join("|")}` },
-      { status: 400 }
-    );
-    if (session.isNew) attachUserIdCookie(res, session.userId);
-    return res;
-  }
-
-  const exam = parsed.data;
+  const parsed = examSchema.safeParse(examRaw);
+  const exam = normalizeExam(parsed.success ? parsed.data : examRaw) || "GENERIC";
 
   await upsertUser(session.userId);
 
@@ -113,8 +103,8 @@ export async function GET(req: Request) {
   ]);
 
   const strategyPlan = latestAttempt?.report?.meta?.strategy_plan;
-  const topActions = Array.isArray(latestAttempt?.report?.top_actions)
-    ? latestAttempt?.report?.top_actions
+  const topActions = Array.isArray(latestAttempt?.report?.next_actions)
+    ? latestAttempt?.report?.next_actions.map((action: any) => action.title)
     : [];
 
   const probeMetrics = progress?.probeMetrics || {};
@@ -192,7 +182,7 @@ export async function GET(req: Request) {
   const ranked = actions.sort((a, b) => b.score - a.score).slice(0, 3);
 
   const res = NextResponse.json({
-    actions: ranked.map(({ score, ...rest }) => rest),
+    actions: ranked,
     learningState: learningState || null,
   });
 

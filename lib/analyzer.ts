@@ -155,7 +155,7 @@ OUTPUT REQUIREMENTS:
 `.trim();
 
 /**
- * Build strategy USER payload (UNCHANGED)
+ * Build strategy USER payload (updated for new schema)
  */
 function buildStrategyUserContent(params: {
   input: AnalyzeInput;
@@ -170,13 +170,14 @@ function buildStrategyUserContent(params: {
 INPUTS:
 exam=${safeText(input.exam)}
 intake=${safeText(input.intake)}
+strategy_meta=${safeText(meta)}
 
 REPORT (compact):
 ${safeText({
     summary: report?.summary,
-    strengths: report?.strengths,
-    weaknesses: report?.weaknesses,
-    remarks: report?.remarks,
+    patterns: report?.patterns,
+    next_actions: report?.next_actions,
+    strategy: report?.strategy,
   }, 2400)}
 
 Return JSON only matching the schema.
@@ -248,7 +249,6 @@ async function generateStrategyPlanOnce(params: {
 }
 
 export async function analyzeMock(input: AnalyzeInput): Promise<Report> {
-  // 1) Report generation (unchanged)
   const prompt = buildPrompt(input);
 
   const response = await client.responses.parse({
@@ -273,7 +273,7 @@ export async function analyzeMock(input: AnalyzeInput): Promise<Report> {
   const report = response.output_parsed as any;
   report.meta = report.meta || {};
 
-  // 2) Strategy generation (BEST-EFFORT, minimal fixes)
+  // Strategy generation (BEST-EFFORT)
   try {
     const strategyMeta: StrategyMeta | undefined = report?.meta?.strategy;
 

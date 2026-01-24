@@ -94,6 +94,14 @@ export type UserLearningStateDoc = {
   createdAt?: Date;
 };
 
+export type AnalyticsEventDoc = {
+  _id?: any;
+  userId: string;
+  event: string;
+  metadata?: Record<string, any>;
+  createdAt: Date;
+};
+
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
@@ -261,14 +269,10 @@ export async function listAttempts(userId: string, limit = 20) {
     exam: r.exam,
     createdAt: r.createdAt,
     summary: r.report?.summary ?? "",
-    focusXP: Math.min(
-      100,
-      (r.report?.weaknesses || []).reduce(
-        (sum: number, w: any) => sum + (Number(w?.severity) || 0) * 10,
-        0
-      )
-    ),
-    estimatedScore: r.report?.estimated_score?.value ?? null,
+    focusXP:
+      r.report?.meta?.focusXP ??
+      Math.min(100, Array.isArray(r.report?.patterns) ? r.report.patterns.length * 12 : 0),
+    estimatedScore: null,
     errorTypes: r.report?.error_types ?? {},
   }));
 }
@@ -384,8 +388,7 @@ export async function updateUser(userId: string, patch: any) {
  */
 
 export async function getUserProgress(userId: string, exam: string) {
-  const ex = normalizeExam(exam);
-  if (!ex) return null;
+  const ex = normalizeExam(exam) || "GENERIC";
 
   const db = await getDb();
   const col = db.collection<UserProgressDoc>("user_progress");
@@ -401,8 +404,7 @@ export async function upsertUserProgress(params: {
   exam: string;
   patch: Partial<UserProgressDoc>;
 }) {
-  const ex = normalizeExam(params.exam);
-  if (!ex) throw new Error("Invalid exam");
+  const ex = normalizeExam(params.exam) || "GENERIC";
 
   const db = await getDb();
   const col = db.collection<UserProgressDoc>("user_progress");
@@ -443,8 +445,7 @@ export async function toggleProbe(params: {
   probe: Probe;
   done: boolean;
 }) {
-  const ex = normalizeExam(params.exam);
-  if (!ex) throw new Error("Invalid exam");
+  const ex = normalizeExam(params.exam) || "GENERIC";
 
   const db = await getDb();
   const col = db.collection<UserProgressDoc>("user_progress");
@@ -492,8 +493,7 @@ export async function toggleProbe(params: {
 }
 
 export async function getUserLearningState(userId: string, exam: string) {
-  const ex = normalizeExam(exam);
-  if (!ex) throw new Error("Invalid exam");
+  const ex = normalizeExam(exam) || "GENERIC";
 
   const db = await getDb();
   const col = db.collection<UserLearningStateDoc>("user_learning_state");
@@ -507,8 +507,7 @@ export async function updateUserLearningStateFromReport(params: {
   report: any;
   attemptId?: string;
 }) {
-  const ex = normalizeExam(params.exam);
-  if (!ex) throw new Error("Invalid exam");
+  const ex = normalizeExam(params.exam) || "GENERIC";
 
 
   const db = await getDb();
@@ -517,15 +516,31 @@ export async function updateUserLearningStateFromReport(params: {
   const existing =
     (await col.findOne({ userId: params.userId, exam: ex })) || null;
 
-  const estimated = params.report?.estimated_score || {};
-  const rawValue = Number(estimated.value);
-  const rawMax = Number(estimated.max);
-  const lastScoreValue = Number.isFinite(rawValue) ? rawValue : null;
-  const lastScoreMax = Number.isFinite(rawMax) ? rawMax : null;
+  const metrics = Array.isArray(params.report?.facts?.metrics)
+    ? params.report.facts.metrics
+    : [];
+  const scoreMetric = metrics.find((m: any) =>
+    String(m?.label || "").toLowerCase().includes("score")
+  );
+  const percentileMetric = metrics.find((m: any) =>
+    String(m?.label || "").toLowerCase().includes("percentile")
+  );
+
+  function parseNumber(value: any) {
+    const num = Number(String(value || "").replace(/[^0-9.]/g, ""));
+    return Number.isFinite(num) ? num : null;
+  }
+
+  const scoreValue = parseNumber(scoreMetric?.value);
+  const scoreMax = parseNumber(scoreMetric?.value?.split?.("/")?.[1]);
+  const percentileValue = parseNumber(percentileMetric?.value);
+
+  const lastScoreValue = scoreValue;
+  const lastScoreMax = scoreMax;
   const lastScorePct =
-    Number.isFinite(rawValue) && Number.isFinite(rawMax) && rawMax > 0
-      ? Math.round((rawValue / rawMax) * 100)
-      : null;
+    scoreValue !== null && scoreMax !== null && scoreMax > 0
+      ? Math.round((scoreValue / scoreMax) * 100)
+      : percentileValue ?? null;
 
   const prevAttempt = params.attemptId
     ? await getLatestAttemptForExam({
@@ -535,13 +550,17 @@ export async function updateUserLearningStateFromReport(params: {
       })
     : null;
 
-  const prevEstimated = prevAttempt?.report?.estimated_score || {};
-  const prevValue = Number(prevEstimated.value);
-  const prevMax = Number(prevEstimated.max);
-
+  const prevMetrics = Array.isArray(prevAttempt?.report?.facts?.metrics)
+    ? prevAttempt.report.facts.metrics
+    : [];
+  const prevScoreMetric = prevMetrics.find((m: any) =>
+    String(m?.label || "").toLowerCase().includes("score")
+  );
+  const prevScoreValue = parseNumber(prevScoreMetric?.value);
+  const prevScoreMax = parseNumber(prevScoreMetric?.value?.split?.("/")?.[1]);
   const prevScorePct =
-    Number.isFinite(prevValue) && Number.isFinite(prevMax) && prevMax > 0
-      ? Math.round((prevValue / prevMax) * 100)
+    prevScoreValue !== null && prevScoreMax !== null && prevScoreMax > 0
+      ? Math.round((prevScoreValue / prevScoreMax) * 100)
       : null;
 
   const lastDeltaScorePct =
@@ -549,13 +568,12 @@ export async function updateUserLearningStateFromReport(params: {
       ? lastScorePct - prevScorePct
       : null;
 
-  const weaknessTopics = Array.isArray(params.report?.weaknesses)
-    ? params.report.weaknesses
-        .map((w: any) => String(w?.topic || "").trim())
+  const weaknessTopics = Array.isArray(params.report?.patterns)
+    ? params.report.patterns
+        .map((p: any) => String(p?.title || "").trim())
         .filter(Boolean)
         .slice(0, 4)
     : [];
-
 
   const strategyConfidenceBand =
     params.report?.meta?.strategy?.confidence_band ??
@@ -634,6 +652,22 @@ export async function listStrategyMemory(userId: string, exam?: string, limit = 
     _is_fallback: r._is_fallback,
     createdAt: r.createdAt,
   }));
+}
+
+export async function saveEvent(params: {
+  userId: string;
+  event: string;
+  metadata?: Record<string, any>;
+}) {
+  const db = await getDb();
+  const col = db.collection<AnalyticsEventDoc>("analytics_events");
+
+  await col.insertOne({
+    userId: params.userId,
+    event: params.event,
+    metadata: params.metadata || {},
+    createdAt: new Date(),
+  });
 }
 
 export async function createOtpRequest(email: string, code: string) {

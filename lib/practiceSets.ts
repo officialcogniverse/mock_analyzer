@@ -1,4 +1,4 @@
-import { type Exam } from "./exams";
+import { type KnownExam, isKnownExam } from "./exams";
 
 export type PracticeSet = {
   id: string;
@@ -79,81 +79,54 @@ const NEET_SETS: PracticeSet[] = [
     description: "High-accuracy Biology set with NCERT-style questions.",
   },
   {
-    id: "neet-phy-sprint",
-    title: "Physics speed sprint",
+    id: "neet-physics-pacing",
+    title: "Physics pacing drill",
     section: "Physics",
-    level: "Medium",
-    questions: 12,
-    minutes: 18,
-    tags: ["physics", "time"],
-    description: "Timed physics mixed set, 90 sec per question goal.",
-  },
-  {
-    id: "neet-chem-memory",
-    title: "Chemistry memory drill",
-    section: "Chemistry",
     level: "Medium",
     questions: 15,
     minutes: 18,
-    tags: ["chemistry", "concepts"],
-    description: "Cover reactions + exceptions with spaced recall prompts.",
+    tags: ["time", "physics"],
+    description: "Timed Physics set with 6-min checkpoints.",
   },
 ];
 
 const JEE_SETS: PracticeSet[] = [
   {
-    id: "jee-phy-advanced",
-    title: "Physics depth booster",
-    section: "Physics",
-    level: "Hard",
-    questions: 8,
-    minutes: 20,
-    tags: ["physics", "concepts"],
-    description: "Mixed conceptual set with post-solve derivation checks.",
-  },
-  {
-    id: "jee-chem-balancing",
-    title: "Chemistry balance set",
-    section: "Chemistry",
-    level: "Medium",
-    questions: 10,
-    minutes: 15,
-    tags: ["chemistry", "accuracy"],
-    description: "Alternate organic/inorganic questions to reduce fatigue.",
-  },
-  {
-    id: "jee-math-sprint",
-    title: "Maths accuracy sprint",
+    id: "jee-math-speed",
+    title: "Maths speed set",
     section: "Mathematics",
     level: "Medium",
     questions: 10,
-    minutes: 20,
-    tags: ["math", "time"],
-    description: "10 mixed questions with strict 2-min max each.",
+    minutes: 15,
+    tags: ["speed", "maths"],
+    description: "Timed Math set with forced skip after 90s.",
+  },
+  {
+    id: "jee-chem-accuracy",
+    title: "Chemistry accuracy ladder",
+    section: "Chemistry",
+    level: "Easy",
+    questions: 18,
+    minutes: 15,
+    tags: ["accuracy", "chemistry"],
+    description: "Accuracy-first Chemistry sprint with 3-min reviews.",
   },
 ];
 
-const EXAM_SETS: Record<Exam, PracticeSet[]> = {
+const EXAM_SETS: Record<KnownExam, PracticeSet[]> = {
   CAT: CAT_SETS,
   NEET: NEET_SETS,
   JEE: JEE_SETS,
 };
 
-function normalize(value: string) {
-  return value.toLowerCase();
-}
-
-export function getPracticeSets(exam: Exam, weaknesses: Array<{ topic?: string }> = []) {
-  const examSets = EXAM_SETS[exam] || [];
-  const topics = weaknesses.map((w) => normalize(String(w?.topic || "")));
-
+export function getPracticeSets(exam: string, weaknesses: Array<{ topic?: string }> = []) {
+  const examSets = isKnownExam(exam) ? EXAM_SETS[exam] || [] : [];
   const matched = examSets.filter((set) =>
-    set.tags.some((tag) => topics.some((topic) => topic.includes(tag)))
+    weaknesses.some((w) =>
+      set.tags.some((tag) => String(w?.topic || "").toLowerCase().includes(tag))
+    )
   );
-
   const fallback = examSets.slice(0, 2);
-  const combined = [...matched, ...fallback, ...COMMON_SETS];
-
-  const unique = Array.from(new Map(combined.map((set) => [set.id, set])).values());
-  return unique.slice(0, 5);
+  const scoped = matched.length ? matched : fallback;
+  return [...COMMON_SETS, ...scoped].slice(0, 4);
 }
