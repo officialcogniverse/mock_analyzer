@@ -56,23 +56,23 @@
 
 :root {
   --radius: 0.9rem;
-  --background: oklch(0.986 0.008 250);
-  --foreground: oklch(0.202 0.03 258);
-  --card: oklch(1 0.008 250);
+  --background: oklch(0.994 0.006 250);
+  --foreground: oklch(0.24 0.028 258);
+  --card: oklch(1 0.004 250);
   --card-foreground: oklch(0.202 0.03 258);
   --popover: oklch(1 0.008 250);
   --popover-foreground: oklch(0.202 0.03 258);
-  --primary: oklch(0.58 0.16 264);
+  --primary: oklch(0.62 0.14 264);
   --primary-foreground: oklch(0.99 0.015 255);
-  --secondary: oklch(0.945 0.02 255);
+  --secondary: oklch(0.965 0.012 255);
   --secondary-foreground: oklch(0.285 0.05 262);
-  --muted: oklch(0.955 0.015 250);
-  --muted-foreground: oklch(0.52 0.04 257);
+  --muted: oklch(0.972 0.01 252);
+  --muted-foreground: oklch(0.48 0.035 257);
   --accent: oklch(0.93 0.04 281);
   --accent-foreground: oklch(0.26 0.05 268);
   --destructive: oklch(0.62 0.22 27);
-  --border: oklch(0.9 0.015 255);
-  --input: oklch(0.9 0.015 255);
+  --border: oklch(0.9 0.01 255);
+  --input: oklch(0.92 0.01 255);
   --ring: oklch(0.64 0.14 270);
   --chart-1: oklch(0.64 0.19 269);
   --chart-2: oklch(0.7 0.16 185);
@@ -87,8 +87,8 @@
   --sidebar-accent-foreground: oklch(0.285 0.05 262);
   --sidebar-border: oklch(0.9 0.015 255);
   --sidebar-ring: oklch(0.64 0.14 270);
-  --gradient-hero: radial-gradient(circle at top left, oklch(0.94 0.08 282) 0%, transparent 55%),
-    radial-gradient(circle at 80% 0%, oklch(0.9 0.07 210) 0%, transparent 58%);
+  --gradient-hero: radial-gradient(circle at top left, oklch(0.97 0.03 282) 0%, transparent 60%),
+    radial-gradient(circle at 85% 10%, oklch(0.97 0.02 210) 0%, transparent 62%);
 }
 
 .dark {
@@ -135,7 +135,7 @@
   body {
     @apply min-h-screen bg-background text-foreground antialiased;
     background-image: var(--gradient-hero);
-    background-attachment: fixed;
+    background-attachment: scroll;
   }
 
   h1 {
@@ -171,11 +171,11 @@
   }
 
   .surface-card {
-    @apply rounded-2xl border border-border/70 bg-card/95 shadow-[0_12px_45px_-25px_rgba(15,23,42,0.22)] backdrop-blur;
+    @apply rounded-2xl border border-border/70 bg-card/95 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.18)] backdrop-blur;
   }
 
   .surface-glow {
-    @apply relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/12 via-primary/6 to-transparent;
+    @apply relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/10 via-background to-transparent;
   }
 
   .tap-scale {
