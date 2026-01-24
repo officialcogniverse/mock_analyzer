@@ -1,34 +1,33 @@
 import { NextResponse } from "next/server";
-import { attachSessionCookie, ensureSession } from "@/lib/session";
-import { fireAndForgetEvent } from "@/lib/events";
+import { getServerSession } from "next-auth";
+
+import { authOptions } from "@/lib/auth";
+import { ok, fail } from "@/lib/api/errors";
 import { EventPayloadSchema } from "@/lib/schemas/event";
+import { fireAndForgetEvent } from "@/lib/events";
+import { assertActiveUser } from "@/lib/users";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
-  const session = ensureSession(req);
-
-  try {
-    const body = await req.json().catch(() => null);
-    const parsed = EventPayloadSchema.safeParse(body);
-
-    if (!parsed.success) {
-      const res = NextResponse.json({ error: "Invalid event payload" }, { status: 400 });
-      if (session.isNew) attachSessionCookie(res, session);
-      return res;
-    }
-
-    fireAndForgetEvent({ userId: session.userId, payload: parsed.data });
-
-    const res = NextResponse.json({ ok: true });
-    if (session.isNew) attachSessionCookie(res, session);
-    return res;
-  } catch (err: any) {
-    const res = NextResponse.json(
-      { error: err?.message || "Event route failed" },
-      { status: 500 }
-    );
-    if (session.isNew) attachSessionCookie(res, session);
-    return res;
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
   }
+  const userId = session.user.id;
+  const activeUser = await assertActiveUser(userId);
+  if (!activeUser || activeUser.blocked) {
+    return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });
+  }
+
+  const body = await req.json();
+  const parsed = EventPayloadSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(fail("INVALID_INPUT", "Invalid event payload.", parsed.error.format()), {
+      status: 400,
+    });
+  }
+
+  fireAndForgetEvent({ userId, payload: parsed.data });
+  return NextResponse.json(ok({ success: true }));
 }

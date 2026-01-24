@@ -4,6 +4,8 @@ import { Toaster } from "sonner";
 
 import { CogniverseProvider } from "@/lib/domain/mockData";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { AuthSessionProvider } from "@/components/providers/session-provider";
+import { SiteHeader } from "@/components/navigation/SiteHeader";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,10 +33,13 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider>
-          <CogniverseProvider>
-            {children}
-            <Toaster richColors position="top-right" />
-          </CogniverseProvider>
+          <AuthSessionProvider>
+            <CogniverseProvider>
+              <SiteHeader />
+              {children}
+              <Toaster richColors position="top-right" />
+            </CogniverseProvider>
+          </AuthSessionProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -520,7 +520,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
             ) : (
               <EmptyState
                 title="Delta pending"
-                description="Upload a second attempt after completing your checklist to unlock deltas and strategy improvement."
+                description="Upload a second attempt after completing your checklist to compare deltas and strategy improvement."
                 action={<Button onClick={() => router.push("/")}>Upload next attempt</Button>}
               />
             )}

@@ -695,7 +695,7 @@ export default function HistoryDashboard() {
               <div className="text-sm text-muted-foreground">Loading…</div>
             ) : !insights ? (
               <div className="text-sm text-muted-foreground">
-                Upload a few mocks to unlock stronger signals.
+                Upload a few mocks to get stronger signals.
               </div>
             ) : (
               <>
@@ -772,7 +772,7 @@ export default function HistoryDashboard() {
               </div>
             ) : (
               <div className="text-sm text-muted-foreground">
-                Upload one mock to unlock your uplift loop.
+                Upload one mock to start your uplift loop.
               </div>
             )}
 
@@ -963,7 +963,7 @@ export default function HistoryDashboard() {
         actions={nextActions}
         loading={nextActionsLoading}
         title="Next best action"
-        emptyMessage="Analyze a mock to unlock the next best action."
+        emptyMessage="Analyze a mock to get the next best action."
         ctaLabel={latest ? "Open latest report" : "Upload first mock"}
         onCtaClick={() => (latest ? router.push(`/report/${latest.id}`) : router.push("/"))}
       />
