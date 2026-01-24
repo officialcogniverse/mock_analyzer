@@ -20,6 +20,7 @@ import { StatPill } from "@/components/stat-pill";
 import { sampleReportPayload } from "@/lib/sampleData";
 import { formatExamLabel } from "@/lib/exams";
 import { trackEvent } from "@/lib/analytics";
+import type { CoachMode } from "@/lib/contracts";
 import {
   fetchWithTimeout,
   isAbortError,
@@ -79,6 +80,15 @@ const SIGNAL_TOTAL = 6;
 
 function storageKey(prefix: string, reportId: string) {
   return `${prefix}:${reportId}`;
+}
+
+function actionSlug(title: string, idx: number) {
+  const base =
+    String(title || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") || `action-${idx + 1}`;
+  return base.slice(0, 64);
 }
 
 function loadStoredState<T>(key: string, fallback: T) {
@@ -145,19 +155,40 @@ export default function ReportPage({
   const [completedActions, setCompletedActions] = useState<
     Record<string, boolean>
   >({});
+  const [actionReflections, setActionReflections] = useState<Record<string, string>>({});
+  const [coachMode, setCoachMode] = useState<CoachMode>("explain_report");
+  const [coachMessage, setCoachMessage] = useState("");
+  const [coachConversationId, setCoachConversationId] = useState("");
+  const [coachMessages, setCoachMessages] = useState<
+    Array<{ role: string; content: string; citations: Array<{ label: string }> }>
+  >([]);
+  const [coachLoading, setCoachLoading] = useState(false);
 
   const isSample = reportId === "sample";
 
   useEffect(() => {
     const completedKey = storageKey("cogniverse_actions", reportId);
+    const reflectionKey = storageKey("cogniverse_action_reflections", reportId);
     const followupKey = storageKey("cogniverse_followups", reportId);
     setCompletedActions(loadStoredState(completedKey, {}));
+    setActionReflections(loadStoredState(reflectionKey, {}));
     setFollowupAnswers(loadStoredState(followupKey, {}));
+  }, [reportId]);
+
+  useEffect(() => {
+    setCoachConversationId("");
+    setCoachMessages([]);
+    setCoachMessage("");
+    setCoachMode("explain_report");
   }, [reportId]);
 
   useEffect(() => {
     saveStoredState(storageKey("cogniverse_actions", reportId), completedActions);
   }, [completedActions, reportId]);
+
+  useEffect(() => {
+    saveStoredState(storageKey("cogniverse_action_reflections", reportId), actionReflections);
+  }, [actionReflections, reportId]);
 
   useEffect(() => {
     saveStoredState(storageKey("cogniverse_followups", reportId), followupAnswers);
@@ -242,6 +273,35 @@ export default function ReportPage({
     };
   }, [isSample]);
 
+  useEffect(() => {
+    if (isSample || !reportData?.id) return;
+    let active = true;
+
+    fetchWithTimeout(`/api/actions?attemptId=${reportData.id}`, { timeoutMs: 8000 })
+      .then(async (res) => {
+        const json = await readJsonSafely<{ states?: any[] } & { error?: string }>(res);
+        if (!active || !res.ok) return;
+        const states = Array.isArray(json?.states) ? json.states : [];
+        const completed: Record<string, boolean> = {};
+        const reflections: Record<string, string> = {};
+        states.forEach((state: any) => {
+          const id = String(state?.actionId || "");
+          if (!id) return;
+          completed[id] = String(state?.status || "pending") === "completed";
+          reflections[id] = String(state?.reflection || "");
+        });
+        setCompletedActions((prev) => ({ ...prev, ...completed }));
+        setActionReflections((prev) => ({ ...prev, ...reflections }));
+      })
+      .catch(() => {
+        // best-effort sync; local storage remains the fallback
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isSample, reportData?.id]);
+
   const report = reportData?.report || EMPTY_REPORT;
   const examLabel = formatExamLabel(reportData?.exam);
 
@@ -261,8 +321,10 @@ export default function ReportPage({
   const completionRate = useMemo(() => {
     const actions = report?.next_actions || [];
     if (!actions.length) return 0;
-    const doneCount = actions.filter((action: any) => completedActions[action.title])
-      .length;
+    const doneCount = actions.filter((action: any, idx: number) => {
+      const actionId = actionSlug(action?.title, idx);
+      return completedActions[actionId];
+    }).length;
     return Math.round((doneCount / actions.length) * 100);
   }, [completedActions, report?.next_actions]);
 
@@ -326,11 +388,111 @@ export default function ReportPage({
     toast.success("Thanks! We saved your answers on this device.");
   }
 
-  function toggleAction(title: string) {
-    const next = !completedActions[title];
-    setCompletedActions((prev) => ({ ...prev, [title]: next }));
-    if (next) {
-      trackEvent("action_marked_done", { attemptId: reportId, metadata: { action: title } });
+  const coachModeOptions: Array<{ id: CoachMode; label: string }> = [
+    { id: "explain_report", label: "Explain my report" },
+    { id: "focus_today", label: "Focus today" },
+    { id: "score_not_improving", label: "Why no improvement?" },
+    { id: "next_mock_strategy", label: "Next mock plan" },
+    { id: "am_i_improving", label: "Am I improving?" },
+  ];
+
+  async function persistAction(params: {
+    actionId: string;
+    title: string;
+    status: "pending" | "completed";
+    reflection?: string;
+  }) {
+    const res = await fetchWithTimeout("/api/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        attemptId: reportId,
+        actionId: params.actionId,
+        title: params.title,
+        status: params.status,
+        reflection: params.reflection,
+      }),
+      timeoutMs: 8000,
+    });
+    const json = await readJsonSafely<{ error?: string }>(res);
+    if (!res.ok) throw new Error(json?.error || "Failed to save action state.");
+    return json;
+  }
+
+  async function toggleAction(actionId: string, title: string) {
+    const nextCompleted = !completedActions[actionId];
+    setCompletedActions((prev) => ({ ...prev, [actionId]: nextCompleted }));
+
+    try {
+      await persistAction({
+        actionId,
+        title,
+        status: nextCompleted ? "completed" : "pending",
+        reflection: actionReflections[actionId],
+      });
+      if (nextCompleted) {
+        trackEvent("action_completed", {
+          attemptId: reportId,
+          metadata: { actionId, action: title },
+        });
+      }
+    } catch (error: any) {
+      setCompletedActions((prev) => ({ ...prev, [actionId]: !nextCompleted }));
+      toast.error(error?.message || "Could not update action.");
+    }
+  }
+
+  async function saveReflection(actionId: string, title: string) {
+    try {
+      await persistAction({
+        actionId,
+        title,
+        status: completedActions[actionId] ? "completed" : "pending",
+        reflection: actionReflections[actionId],
+      });
+      toast.success("Reflection saved.");
+    } catch (error: any) {
+      toast.error(error?.message || "Could not save reflection.");
+    }
+  }
+
+  async function sendCoachMessage() {
+    if (isSample) {
+      toast.message("Coach is disabled on the sample report.");
+      return;
+    }
+    if (!reportData?.id) {
+      toast.error("Report context missing.");
+      return;
+    }
+
+    setCoachLoading(true);
+    try {
+      const res = await fetchWithTimeout("/api/coach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          attemptId: reportId,
+          mode: coachMode,
+          message: coachMessage.trim() || undefined,
+          conversationId: coachConversationId || undefined,
+        }),
+        timeoutMs: 15000,
+      });
+      const json = await readJsonSafely<any>(res);
+      if (!res.ok) throw new Error(json?.error || "Coach request failed.");
+
+      if (json?.conversation?.conversationId) {
+        setCoachConversationId(String(json.conversation.conversationId));
+      }
+      if (Array.isArray(json?.messages)) {
+        setCoachMessages(json.messages);
+      }
+      setCoachMessage("");
+    } catch (error: any) {
+      toast.error(error?.message || "Coach is unavailable right now.");
+    } finally {
+      setCoachLoading(false);
     }
   }
 
@@ -343,6 +505,7 @@ export default function ReportPage({
     "summary",
     "patterns",
     "actions",
+    "coach",
     "strategy",
     "history",
     "followups",
@@ -551,43 +714,138 @@ export default function ReportPage({
                 </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <p className="mb-3 text-sm text-muted-foreground">
-                    Complete these before the next mock. Progress saves locally on this device.
+                    Complete these before the next mock. Progress syncs to your coach and institute.
                   </p>
                   {report.next_actions?.length ? (
                     <div className="space-y-3">
-                      {report.next_actions.map((action: any, idx: number) => (
-                        <div key={`${action.title}-${idx}`} className="rounded-xl border p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="space-y-1">
-                              <div className="text-sm font-semibold text-slate-900">
-                                {action.title}
+                      {report.next_actions.map((action: any, idx: number) => {
+                        const actionId = actionSlug(action?.title, idx);
+                        const completed = completedActions[actionId];
+                        return (
+                          <div key={`${action.title}-${idx}`} className="rounded-xl border p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="text-sm font-semibold text-slate-900">
+                                  {action.title}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {action.duration} · {action.expected_impact}
+                                </div>
                               </div>
-                              <div className="text-xs text-muted-foreground">
-                                {action.duration} · {action.expected_impact}
-                              </div>
+                              <Button
+                                size="sm"
+                                variant={completed ? "default" : "outline"}
+                                onClick={() => toggleAction(actionId, action.title)}
+                              >
+                                {completed ? "Done" : "Mark done"}
+                              </Button>
                             </div>
-                            <Button
-                              size="sm"
-                              variant={completedActions[action.title] ? "default" : "outline"}
-                              onClick={() => toggleAction(action.title)}
-                            >
-                              {completedActions[action.title] ? "Done" : "Mark done"}
-                            </Button>
+                            {action.steps?.length ? (
+                              <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                                {action.steps.map((step: string, sIdx: number) => (
+                                  <li key={`${action.title}-${sIdx}`}>{step}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            {completed ? (
+                              <div className="mt-3 space-y-2">
+                                <div className="text-xs font-medium text-slate-700">
+                                  Reflection (what changed when you tried this?)
+                                </div>
+                                <textarea
+                                  className="min-h-[80px] w-full rounded-lg border border-slate-200 bg-white p-2 text-sm"
+                                  value={actionReflections[actionId] || ""}
+                                  onChange={(e) =>
+                                    setActionReflections((prev) => ({
+                                      ...prev,
+                                      [actionId]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="Example: I stopped guessing in QA and my accuracy felt calmer."
+                                />
+                                <div className="flex justify-end">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => saveReflection(actionId, action.title)}
+                                  >
+                                    Save reflection
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
-                          {action.steps?.length ? (
-                            <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-                              {action.steps.map((step: string, sIdx: number) => (
-                                <li key={`${action.title}-${sIdx}`}>{step}</li>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="No actions yet"
+                      description="We need clearer patterns to recommend the best next actions."
+                    />
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+
+              <AccordionItem value="coach" className="rounded-xl border px-4">
+                <AccordionTrigger className="py-3 text-base font-semibold">
+                  AI coach
+                </AccordionTrigger>
+                <AccordionContent className="space-y-3 pb-4">
+                  <p className="text-sm text-muted-foreground">
+                    The coach responds only to evidence from this report, your past attempts,
+                    and your completed actions.
+                  </p>
+                  <div className="grid gap-2 md:grid-cols-3">
+                    {coachModeOptions.map((option) => (
+                      <Button
+                        key={option.id}
+                        type="button"
+                        size="sm"
+                        variant={coachMode === option.id ? "default" : "outline"}
+                        onClick={() => setCoachMode(option.id)}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                    <Input
+                      value={coachMessage}
+                      onChange={(e) => setCoachMessage(e.target.value)}
+                      placeholder="Optional: add context (e.g., I panicked in section 2)."
+                    />
+                    <Button type="button" onClick={sendCoachMessage} disabled={coachLoading}>
+                      {coachLoading ? "Coaching..." : "Ask coach"}
+                    </Button>
+                  </div>
+                  {coachMessages.length ? (
+                    <div className="space-y-2">
+                      {coachMessages.map((message, idx) => (
+                        <div key={`${message.role}-${idx}`} className="rounded-xl border p-3">
+                          <div className="text-xs font-semibold uppercase text-muted-foreground">
+                            {message.role === "coach" ? "Coach" : "You"}
+                          </div>
+                          <div className="mt-1 whitespace-pre-wrap text-sm text-slate-900">
+                            {message.content}
+                          </div>
+                          {Array.isArray(message.citations) && message.citations.length ? (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {message.citations.map((citation: any, cIdx: number) => (
+                                <Badge key={`${citation.label}-${cIdx}`} variant="secondary">
+                                  {citation.label}
+                                </Badge>
                               ))}
-                            </ul>
+                            </div>
                           ) : null}
                         </div>
                       ))}
                     </div>
                   ) : (
                     <EmptyState
-                      title="No actions yet"
-                      description="We need clearer patterns to recommend the best next actions."
+                      title="Coach is ready"
+                      description="Pick a mode above to receive grounded next steps."
                     />
                   )}
                 </AccordionContent>

@@ -7,7 +7,7 @@ import {
   toggleProbe,
   type Probe,
 } from "@/lib/persist";
-import { attachUserIdCookie, ensureUserId } from "@/lib/session";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
 import { normalizeExam } from "@/lib/exams";
 
 export const runtime = "nodejs";
@@ -95,7 +95,12 @@ const postSchema = z
  * GET /api/progress?exam=CAT
  */
 export async function GET(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
+  if (session.mode !== "student") {
+    const res = NextResponse.json({ error: "Progress is student-only." }, { status: 403 });
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
+  }
   const url = new URL(req.url);
 
   const examRaw = url.searchParams.get("exam") || "";
@@ -117,7 +122,7 @@ export async function GET(req: Request) {
     },
   });
 
-  if (session.isNew) attachUserIdCookie(res, session.userId);
+  if (session.isNew) attachSessionCookie(res, session);
   return res;
 }
 
@@ -125,7 +130,12 @@ export async function GET(req: Request) {
  * POST /api/progress
  */
 export async function POST(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
+  if (session.mode !== "student") {
+    const res = NextResponse.json({ error: "Progress is student-only." }, { status: 403 });
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
+  }
 
   try {
     const body = await req.json();
@@ -136,7 +146,7 @@ export async function POST(req: Request) {
         { error: "Invalid body", issues: parsed.error.issues },
         { status: 400 }
       );
-      if (session.isNew) attachUserIdCookie(res, session.userId);
+      if (session.isNew) attachSessionCookie(res, session);
       return res;
     }
 
@@ -167,7 +177,7 @@ export async function POST(req: Request) {
       });
 
       const res = NextResponse.json({ progress: out });
-      if (session.isNew) attachUserIdCookie(res, session.userId);
+      if (session.isNew) attachSessionCookie(res, session);
       return res;
     }
 
@@ -201,7 +211,7 @@ export async function POST(req: Request) {
         { error: "Nothing to update. Provide planner fields or probe+done." },
         { status: 400 }
       );
-      if (session.isNew) attachUserIdCookie(res, session.userId);
+      if (session.isNew) attachSessionCookie(res, session);
       return res;
     }
 
@@ -212,14 +222,14 @@ export async function POST(req: Request) {
     });
 
     const res = NextResponse.json({ progress: out });
-    if (session.isNew) attachUserIdCookie(res, session.userId);
+    if (session.isNew) attachSessionCookie(res, session);
     return res;
   } catch (e: any) {
     const res = NextResponse.json(
       { error: e?.message || "Progress API failed" },
       { status: 500 }
     );
-    if (session.isNew) attachUserIdCookie(res, session.userId);
+    if (session.isNew) attachSessionCookie(res, session);
     return res;
   }
 }

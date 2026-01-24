@@ -1,30 +1,34 @@
 import { NextResponse } from "next/server";
-import { ensureUserId } from "@/lib/session";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
 import { fireAndForgetEvent } from "@/lib/events";
 import { EventPayloadSchema } from "@/lib/schemas/event";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+  const session = ensureSession(req);
+
   try {
-    const session = ensureUserId(req);
-
-    // ✅ route me request body aise parse karte hain
     const body = await req.json().catch(() => null);
-
     const parsed = EventPayloadSchema.safeParse(body);
 
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid event payload" }, { status: 400 });
+      const res = NextResponse.json({ error: "Invalid event payload" }, { status: 400 });
+      if (session.isNew) attachSessionCookie(res, session);
+      return res;
     }
 
     fireAndForgetEvent({ userId: session.userId, payload: parsed.data });
 
-    return NextResponse.json({ ok: true });
+    const res = NextResponse.json({ ok: true });
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
   } catch (err: any) {
-    return NextResponse.json(
+    const res = NextResponse.json(
       { error: err?.message || "Event route failed" },
       { status: 500 }
     );
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
   }
 }

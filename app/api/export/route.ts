@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ensureUserId, attachUserIdCookie } from "@/lib/session";
+import { ensureSession, attachSessionCookie } from "@/lib/session";
 import { getUser, listAttemptsForExport } from "@/lib/persist";
 
 export const runtime = "nodejs";
@@ -23,7 +23,12 @@ function toCsv(rows: Record<string, any>[]) {
 }
 
 export async function GET(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
+  if (session.mode !== "student") {
+    const res = NextResponse.json({ error: "Export is student-only here." }, { status: 403 });
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
+  }
   const url = new URL(req.url);
   const format = String(url.searchParams.get("format") || "json").toLowerCase();
 
@@ -57,7 +62,7 @@ export async function GET(req: Request) {
         "content-disposition": "attachment; filename=mock_export.csv",
       },
     });
-    if (session.isNew) attachUserIdCookie(res, session.userId);
+    if (session.isNew) attachSessionCookie(res, session);
     return res;
   }
 
@@ -71,6 +76,6 @@ export async function GET(req: Request) {
     },
     attempts,
   });
-  if (session.isNew) attachUserIdCookie(res, session.userId);
+  if (session.isNew) attachSessionCookie(res, session);
   return res;
 }

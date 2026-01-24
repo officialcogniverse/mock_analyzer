@@ -2,20 +2,26 @@ import { z } from "zod";
 import { getDb } from "@/lib/mongo";
 
 export const EventNameSchema = z.enum([
-  "ui_viewed_report",
-  "ui_clicked_cta",
+  "login_success",
   "attempt_uploaded",
   "report_generated",
-  "action_marked_done",
+  "coach_message_sent",
+  "action_completed",
+  "next_attempt_uploaded",
+  // legacy UI events retained for backwards compatibility
+  "ui_viewed_report",
+  "ui_clicked_cta",
   "followup_answered",
   "export_clicked",
 ]);
 
-export const EventPayloadSchema = z.object({
-  event_name: EventNameSchema,
-  attempt_id: z.string().min(1).optional(),
-  metadata: z.record(z.any()).optional(),
-});
+export const EventPayloadSchema = z
+  .object({
+    event_name: EventNameSchema,
+    attempt_id: z.string().min(1).optional(),
+    metadata: z.record(z.any()).optional(),
+  })
+  .strict();
 
 export type EventName = z.infer<typeof EventNameSchema>;
 export type EventPayload = z.infer<typeof EventPayloadSchema>;
@@ -29,10 +35,7 @@ export type EventDoc = {
   created_at: Date;
 };
 
-export async function writeEvent(params: {
-  userId: string;
-  payload: EventPayload;
-}) {
+export async function writeEvent(params: { userId: string; payload: EventPayload }) {
   const db = await getDb();
   const col = db.collection<EventDoc>("events");
 

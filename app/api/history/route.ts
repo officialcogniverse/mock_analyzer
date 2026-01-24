@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 import { normalizeExam } from "@/lib/exams";
 import { listAttempts, upsertUser } from "@/lib/persist";
-import { attachUserIdCookie, ensureUserId } from "@/lib/session";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
+
+  if (session.mode !== "student") {
+    const res = NextResponse.json({ error: "History is student-only." }, { status: 403 });
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
+  }
 
   try {
     await upsertUser(session.userId);
@@ -15,15 +21,12 @@ export async function GET(req: Request) {
     const limit = Math.min(Number(url.searchParams.get("limit") || "20"), 50);
     const exam = normalizeExam(url.searchParams.get("exam") || "");
 
-    // listAttempts returns all attempts
     const rows = await listAttempts(session.userId, limit);
-
 
     const items = exam
       ? rows.filter((x: any) => String(x.exam || "").toUpperCase() === exam)
       : rows;
 
-    // Useful meta for "Continue journey" per exam
     const latestByExam: Record<string, string> = {};
     for (const it of rows) {
       const ex = normalizeExam(it?.exam);
@@ -38,14 +41,14 @@ export async function GET(req: Request) {
       meta: { latestId, latestByExam, limit, exam: exam ?? "ALL" },
     });
 
-    if (session.isNew) attachUserIdCookie(res, session.userId);
+    if (session.isNew) attachSessionCookie(res, session);
     return res;
   } catch (e: any) {
     const res = NextResponse.json(
       { error: e?.message || "Failed to load history" },
       { status: 500 }
     );
-    if (session.isNew) attachUserIdCookie(res, session.userId);
+    if (session.isNew) attachSessionCookie(res, session);
     return res;
   }
 }

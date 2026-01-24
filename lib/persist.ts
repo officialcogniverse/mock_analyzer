@@ -102,6 +102,83 @@ export type AnalyticsEventDoc = {
   createdAt: Date;
 };
 
+export type InstituteRole = "admin" | "mentor";
+
+export type InstituteDoc = {
+  _id?: any;
+  code: string;
+  name: string;
+  adminEmail: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type InstituteMemberDoc = {
+  _id?: any;
+  instituteId: string;
+  userId: string;
+  email: string;
+  role: InstituteRole;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ActionDoc = {
+  _id?: any;
+  userId: string;
+  attemptId: string;
+  actionId: string;
+  title: string;
+  status: "pending" | "completed";
+  reflection?: string;
+  completedAt?: Date | null;
+  updatedAt: Date;
+  createdAt: Date;
+};
+
+export type CoachConversationDoc = {
+  _id?: any;
+  userId: string;
+  exam: string;
+  conversationId: string;
+  attemptId: string;
+  linkedAttemptIds: string[];
+  referencedPatterns: string[];
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CoachMessageDoc = {
+  _id?: any;
+  conversationId: string;
+  userId: string;
+  attemptId: string;
+  role: "user" | "coach";
+  mode:
+    | "explain_report"
+    | "focus_today"
+    | "score_not_improving"
+    | "next_mock_strategy"
+    | "am_i_improving";
+  content: string;
+  citations: Array<{
+    type: "pattern" | "action" | "metric" | "comparison";
+    ref: string;
+    label: string;
+  }>;
+  createdAt: Date;
+};
+
+export type MentorNoteDoc = {
+  _id?: any;
+  instituteId: string;
+  studentUserId: string;
+  authorUserId: string;
+  authorRole: InstituteRole;
+  note: string;
+  createdAt: Date;
+};
+
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
@@ -668,6 +745,308 @@ export async function saveEvent(params: {
     metadata: params.metadata || {},
     createdAt: new Date(),
   });
+}
+
+function normalizeInstituteCode(code: string) {
+  return String(code || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+export async function upsertInstituteByCode(params: {
+  code: string;
+  name?: string;
+  adminEmail: string;
+}) {
+  const db = await getDb();
+  const col = db.collection<InstituteDoc>("institutes");
+
+  const code = normalizeInstituteCode(params.code);
+  if (!code) throw new Error("Institute code missing");
+
+  const adminEmail = String(params.adminEmail || "").trim().toLowerCase();
+  if (!adminEmail) throw new Error("Institute admin email missing");
+
+  const now = new Date();
+
+  await col.updateOne(
+    { code },
+    {
+      $setOnInsert: {
+        code,
+        name: params.name?.trim() || "Cogniverse Institute",
+        adminEmail,
+        createdAt: now,
+      },
+      $set: {
+        name: params.name?.trim() || "Cogniverse Institute",
+        adminEmail,
+        updatedAt: now,
+      },
+    },
+    { upsert: true }
+  );
+
+  return col.findOne({ code });
+}
+
+export async function getInstituteByCode(code: string) {
+  const db = await getDb();
+  const col = db.collection<InstituteDoc>("institutes");
+  const normalized = normalizeInstituteCode(code);
+  if (!normalized) return null;
+  return col.findOne({ code: normalized });
+}
+
+export async function upsertInstituteMembership(params: {
+  instituteId: string;
+  userId: string;
+  email: string;
+  role: InstituteRole;
+}) {
+  const db = await getDb();
+  const col = db.collection<InstituteMemberDoc>("institute_memberships");
+
+  const now = new Date();
+  const email = String(params.email || "").trim().toLowerCase();
+
+  await col.updateOne(
+    { instituteId: params.instituteId, userId: params.userId },
+    {
+      $setOnInsert: {
+        instituteId: params.instituteId,
+        userId: params.userId,
+        email,
+        createdAt: now,
+      },
+      $set: {
+        role: params.role,
+        email,
+        updatedAt: now,
+      },
+    },
+    { upsert: true }
+  );
+
+  return col.findOne({ instituteId: params.instituteId, userId: params.userId });
+}
+
+export async function getInstituteMembership(params: { instituteId: string; userId: string }) {
+  const db = await getDb();
+  const col = db.collection<InstituteMemberDoc>("institute_memberships");
+  return col.findOne({ instituteId: params.instituteId, userId: params.userId });
+}
+
+export async function listInstituteMembers(instituteId: string) {
+  const db = await getDb();
+  const col = db.collection<InstituteMemberDoc>("institute_memberships");
+  const rows = await col.find({ instituteId }).sort({ createdAt: -1 }).toArray();
+  return rows.map((row) => ({
+    instituteId: row.instituteId,
+    userId: row.userId,
+    email: row.email,
+    role: row.role,
+    createdAt: row.createdAt,
+  }));
+}
+
+function actionSlug(title: string, idx: number) {
+  const base =
+    String(title || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") || `action-${idx + 1}`;
+  return base.slice(0, 64);
+}
+
+export async function listActionStatesForAttempt(params: {
+  userId: string;
+  attemptId: string;
+  actionTitles: string[];
+}) {
+  const db = await getDb();
+  const col = db.collection<ActionDoc>("actions");
+
+  const rows = await col
+    .find({ userId: params.userId, attemptId: params.attemptId })
+    .toArray();
+
+  const byId = new Map(rows.map((row) => [row.actionId, row]));
+
+  return params.actionTitles.map((title, idx) => {
+    const actionId = actionSlug(title, idx);
+    const existing = byId.get(actionId);
+    return {
+      actionId,
+      title,
+      status: existing?.status || "pending",
+      reflection: existing?.reflection || "",
+      completedAt:
+        existing?.completedAt instanceof Date
+          ? existing.completedAt.toISOString()
+          : existing?.completedAt
+          ? String(existing.completedAt)
+          : null,
+    };
+  });
+}
+
+export async function upsertActionState(params: {
+  userId: string;
+  attemptId: string;
+  actionId: string;
+  title: string;
+  status: "pending" | "completed";
+  reflection?: string;
+}) {
+  const db = await getDb();
+  const col = db.collection<ActionDoc>("actions");
+
+  const now = new Date();
+  const completedAt = params.status === "completed" ? now : null;
+
+  await col.updateOne(
+    { userId: params.userId, attemptId: params.attemptId, actionId: params.actionId },
+    {
+      $setOnInsert: {
+        userId: params.userId,
+        attemptId: params.attemptId,
+        actionId: params.actionId,
+        title: params.title,
+        createdAt: now,
+      },
+      $set: {
+        title: params.title,
+        status: params.status,
+        reflection: params.reflection?.trim() || "",
+        completedAt,
+        updatedAt: now,
+      },
+    },
+    { upsert: true }
+  );
+
+  return col.findOne({ userId: params.userId, attemptId: params.attemptId, actionId: params.actionId });
+}
+
+export async function getActionSummaryForAttempt(attemptId: string) {
+  const db = await getDb();
+  const col = db.collection<ActionDoc>("actions");
+
+  const rows = await col.find({ attemptId }).toArray();
+  const total = rows.length;
+  const completed = rows.filter((row) => row.status === "completed").length;
+  const completionRate = total ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+
+  return { total, completed, completionRate };
+}
+
+export async function createCoachConversation(params: {
+  userId: string;
+  exam: string;
+  attemptId: string;
+  linkedAttemptIds: string[];
+  referencedPatterns: string[];
+}) {
+  const db = await getDb();
+  const col = db.collection<CoachConversationDoc>("coach_conversations");
+
+  const conversationId = new ObjectId().toString();
+  const now = new Date();
+
+  const doc: CoachConversationDoc = {
+    userId: params.userId,
+    exam: String(params.exam || "").toUpperCase(),
+    conversationId,
+    attemptId: params.attemptId,
+    linkedAttemptIds: params.linkedAttemptIds,
+    referencedPatterns: params.referencedPatterns,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await col.insertOne(doc);
+  return doc;
+}
+
+export async function getCoachConversation(params: { conversationId: string; userId: string }) {
+  const db = await getDb();
+  const col = db.collection<CoachConversationDoc>("coach_conversations");
+  return col.findOne({ conversationId: params.conversationId, userId: params.userId });
+}
+
+export async function appendCoachMessage(params: CoachMessageDoc) {
+  const db = await getDb();
+  const messages = db.collection<CoachMessageDoc>("coach_messages");
+  const conversations = db.collection<CoachConversationDoc>("coach_conversations");
+
+  await messages.insertOne({ ...params, createdAt: params.createdAt || new Date() });
+  await conversations.updateOne(
+    { conversationId: params.conversationId },
+    { $set: { updatedAt: new Date() } }
+  );
+}
+
+export async function listCoachMessages(params: { conversationId: string; userId: string }) {
+  const db = await getDb();
+  const messages = db.collection<CoachMessageDoc>("coach_messages");
+
+  const rows = await messages
+    .find({ conversationId: params.conversationId, userId: params.userId })
+    .sort({ createdAt: 1 })
+    .toArray();
+
+  return rows.map((row) => ({
+    role: row.role,
+    mode: row.mode,
+    content: row.content,
+    citations: row.citations,
+    createdAt:
+      row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt || ""),
+  }));
+}
+
+export async function addMentorNote(params: {
+  instituteId: string;
+  studentUserId: string;
+  authorUserId: string;
+  authorRole: InstituteRole;
+  note: string;
+}) {
+  const db = await getDb();
+  const col = db.collection<MentorNoteDoc>("mentor_notes");
+
+  const doc: MentorNoteDoc = {
+    instituteId: params.instituteId,
+    studentUserId: params.studentUserId,
+    authorUserId: params.authorUserId,
+    authorRole: params.authorRole,
+    note: params.note.trim(),
+    createdAt: new Date(),
+  };
+
+  await col.insertOne(doc);
+  return doc;
+}
+
+export async function listMentorNotes(params: { instituteId: string; studentUserId: string }) {
+  const db = await getDb();
+  const col = db.collection<MentorNoteDoc>("mentor_notes");
+  const rows = await col
+    .find({ instituteId: params.instituteId, studentUserId: params.studentUserId })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .toArray();
+
+  return rows.map((row) => ({
+    note: row.note,
+    authorUserId: row.authorUserId,
+    authorRole: row.authorRole,
+    createdAt:
+      row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt || ""),
+  }));
 }
 
 export async function createOtpRequest(email: string, code: string) {

@@ -9,9 +9,10 @@ import {
   saveAttempt,
   saveStrategyMemorySnapshot,
   updateUserLearningStateFromReport,
+  getLatestAttemptForExam,
 } from "@/lib/persist";
 import { analyzeViaPython } from "@/lib/pythonClient";
-import { attachUserIdCookie, ensureUserId } from "@/lib/session";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
 import { extractTextFromImages } from "@/lib/extractTextFromImages";
 import { fireAndForgetEvent } from "@/lib/events";
 import { z } from "zod";
@@ -206,7 +207,15 @@ function computeSignalScaffold({
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
+  if (session.mode !== "student") {
+    const res = NextResponse.json(
+      { error: "Institute sessions cannot upload attempts." },
+      { status: 403 }
+    );
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
+  }
   try {
     const contentType = req.headers.get("content-type") || "";
 
@@ -226,7 +235,7 @@ export async function POST(req: Request) {
       const parsedIntake = intakeSchema.safeParse(intakeRaw);
       if (!parsedIntake.success) {
         const res = NextResponse.json({ error: "Invalid intake data." }, { status: 400 });
-        if (session.isNew) attachUserIdCookie(res, session.userId);
+        if (session.isNew) attachSessionCookie(res, session);
         return res;
       }
       intake = parsedIntake.data as any;
@@ -280,7 +289,7 @@ export async function POST(req: Request) {
       const parsedIntake = intakeSchema.safeParse(body.intake);
       if (!parsedIntake.success) {
         const res = NextResponse.json({ error: "Invalid intake data." }, { status: 400 });
-        if (session.isNew) attachUserIdCookie(res, session.userId);
+        if (session.isNew) attachSessionCookie(res, session);
         return res;
       }
       intake = parsedIntake.data as any;
@@ -334,6 +343,11 @@ export async function POST(req: Request) {
       }));
     }
 
+    const previousAttempt = await getLatestAttemptForExam({
+      userId: session.userId,
+      exam: examLabel,
+    });
+
     const attemptId = await saveAttempt({
       userId: session.userId,
       exam: examLabel,
@@ -368,6 +382,20 @@ export async function POST(req: Request) {
       },
     });
 
+    if (previousAttempt?._id) {
+      fireAndForgetEvent({
+        userId: session.userId,
+        payload: {
+          event_name: "next_attempt_uploaded",
+          attempt_id: attemptId,
+          metadata: {
+            exam: examLabel,
+            previous_attempt_id: previousAttempt._id.toString(),
+          },
+        },
+      });
+    }
+
     try {
       const strategyPlan = report?.meta?.strategy_plan;
       if (strategyPlan) {
@@ -394,12 +422,12 @@ export async function POST(req: Request) {
     }
 
     const res = NextResponse.json({ id: attemptId });
-    if (session.isNew) attachUserIdCookie(res, session.userId);
+    if (session.isNew) attachSessionCookie(res, session);
     return res;
   } catch (e: any) {
     console.error("Analyze API failed:", e?.message ?? e);
     const res = NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
-    if (session.isNew) attachUserIdCookie(res, session.userId);
+    if (session.isNew) attachSessionCookie(res, session);
     return res;
   }
 }
