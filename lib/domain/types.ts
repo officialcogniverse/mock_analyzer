@@ -1,185 +1,173 @@
-export type SessionUser = {
-  userId: string;
-  displayName?: string | null;
-  createdAt?: string;
-};
+export type GoalFocus = "Score" | "Accuracy" | "Speed" | "Concepts";
 
-export type StudentProfile = {
-  displayName: string;
-  targetExamLabel?: string | null;
-  goal: "score" | "accuracy" | "speed" | "concepts";
-  nextMockDate?: string | null;
-  dailyStudyMinutes: number;
-  biggestStruggle?: string | null;
-  timezone: string;
-};
+export type SignalQuality = "Low" | "Medium" | "High";
 
-export type AttemptMetric = {
-  label: string;
-  value: string;
-  evidence?: string;
-};
+export type Severity = "low" | "medium" | "high" | "critical";
 
-export type Attempt = {
+export type StrategyConfidenceSource = "attempt" | "self-report" | "derived" | "historical";
+
+export interface Attempt {
   id: string;
-  user_id: string;
-  userId?: string;
-  created_at: string;
-  createdAt?: string;
-  source_type: "upload" | "text" | "manual";
-  sourceType?: "upload" | "text" | "manual";
-  raw_text?: string;
-  rawText?: string;
-  metrics: AttemptMetric[];
-  exam: string;
-};
-
-export type ReportPattern = {
-  id: string;
-  title: string;
-  evidence: string;
-  impact: string;
-  fix: string;
-  severity: number;
-};
-
-export type ReportAction = {
-  id: string;
-  title: string;
-  why: string;
-  duration_min: number;
-  duration?: string;
-  difficulty: number;
-  steps: string[];
-  success_metric: string;
-  expectedImpact?: string;
-};
-
-export type ReportPlanTask = {
-  action_id?: string;
-  actionId?: string;
-  title: string;
-  duration_min: number;
-  durationMin?: number;
-  note?: string;
-};
-
-export type ReportPlanDay = {
-  day_index: number;
-  dayIndex?: number;
-  label: string;
-  focus: string;
-  tasks: ReportPlanTask[];
-};
-
-export type ReportPlan = {
-  days: ReportPlanDay[];
-};
-
-export type ReportProbe = {
-  id: string;
-  title: string;
-  duration_min: number;
-  durationMin?: number;
-  instructions: string;
-  success_check: string;
-};
-
-export type Report = {
-  report_id: string;
-  reportId?: string;
-  user_id: string;
-  userId?: string;
-  attempt_id: string;
-  attemptId?: string;
-  created_at: string;
-  createdAt?: string;
-  signal_quality: "low" | "medium" | "high";
-  signalQuality?: "low" | "medium" | "high";
-  confidence: number;
-  primary_bottleneck: string;
-  primaryBottleneck?: string;
-  summary: string;
-  patterns: ReportPattern[];
-  next_actions: ReportAction[];
-  nextActions?: ReportAction[];
-  plan: ReportPlan;
-  probes: ReportProbe[];
-  next_mock_strategy: {
-    rules: string[];
-    time_checkpoints: string[];
-    timeCheckpoints?: string[];
-    skip_policy: string[];
-    skipPolicy?: string[];
-  };
-  nextMockStrategy?: {
-    rules: string[];
-    time_checkpoints: string[];
-    skip_policy: string[];
-  };
-  overall_exam_strategy: {
-    weekly_rhythm: string[];
-    weeklyRhythm?: string[];
-    revision_loop: string[];
-    revisionLoop?: string[];
-    mock_schedule: string[];
-    mockSchedule?: string[];
-  };
-  overallExamStrategy?: {
-    weekly_rhythm: string[];
-    revision_loop: string[];
-    mock_schedule: string[];
-  };
-  followups: Array<{
-    id: string;
-    question: string;
-    type: "single" | "text";
-    options?: string[];
+  examLabel?: string;
+  date: string;
+  score: number;
+  accuracy: number;
+  speed: number;
+  risk: number;
+  consistency: number;
+  timeTakenMinutes: number;
+  percentile?: number;
+  sections: Array<{
+    name: string;
+    accuracy: number;
+    speed: number;
+    attempts: number;
+    correct: number;
   }>;
-  meta?: Record<string, unknown>;
-};
+  notes?: string;
+}
 
-export type ActionState = {
-  user_id: string;
-  userId?: string;
-  attempt_id: string;
-  attemptId?: string;
-  action_id: string;
+export interface PersonaHypothesis {
+  id: string;
+  label:
+    | "High-variance sprinter"
+    | "Overthinker"
+    | "Risky guesser"
+    | "Careless drifter"
+    | "Slow stabilizer";
+  confidence: number;
+  why: string[];
+  signals: string[];
+  assumptions: string[];
+}
+
+export interface PatternInsight {
+  id: string;
+  title: string;
+  severity: Severity;
+  evidence: string;
+  fix: string;
+  isHypothesis?: boolean;
+  tags: string[];
+}
+
+export interface NextBestAction {
+  id: string;
+  title: string;
+  summary: string;
+  durationMinutes: number;
+  difficulty: "Easy win" | "Focused" | "Deep work";
+  whyThisHelps: string;
+  steps: Array<{ id: string; label: string }>;
+  tags: string[];
+  relatedPatternIds: string[];
+  energy: "low" | "medium" | "high";
+  impact: number;
+  isCompleted?: boolean;
+}
+
+export interface PlanTask {
+  id: string;
   actionId?: string;
-  status: "pending" | "completed" | "skipped";
-  updated_at: string;
-  updatedAt?: string;
-  reflection?: string;
-};
+  title: string;
+  durationMinutes: number;
+  type: "drill" | "review" | "mock" | "recovery";
+  why: string;
+  completed?: boolean;
+  tags: string[];
+}
 
-export type Event = {
-  user_id: string;
+export interface PlanDay {
+  id: string;
+  dayIndex: number;
+  label: string;
+  date: string;
+  focus: string;
+  tasks: PlanTask[];
+  milestone?: string;
+  status: "completed" | "current" | "upcoming";
+  energyHint: "low" | "medium" | "high";
+}
+
+export interface Note {
+  id: string;
+  createdAt: string;
+  title: string;
+  body: string;
+  tags: string[];
+  linkedActionId?: string;
+  linkedAttemptId?: string;
+  isPinned?: boolean;
+}
+
+export interface StrategyEvidence {
+  id: string;
+  source: StrategyConfidenceSource;
+  label: string;
+  detail: string;
+  weight: number;
+}
+
+export interface StrategyRecommendation {
+  id: string;
   name: string;
-  metadata?: Record<string, unknown>;
-  created_at: string;
-};
+  summary: string;
+  bottleneck: string;
+  signalQuality: SignalQuality;
+  confidence: number;
+  assumptions: string[];
+  signals: StrategyEvidence[];
+  confidenceNotes: string[];
+}
 
-export type AttemptBundle = {
-  attempt: Attempt;
-  report: Report;
-  profile?: StudentProfile | null;
-};
+export interface Report {
+  id: string;
+  generatedAt: string;
+  goal: GoalFocus;
+  streakDays: number;
+  weeklyCompletion: Array<{ day: string; completed: number }>;
+  confidenceHistory: Array<{ label: string; confidence: number }>;
+  attempts: Attempt[];
+  currentAttemptId: string;
+  patterns: PatternInsight[];
+  actions: NextBestAction[];
+  plan: PlanDay[];
+  notes: Note[];
+  personas: PersonaHypothesis[];
+  strategy: StrategyRecommendation;
+  deltas: {
+    accuracy: number;
+    speed: number;
+    risk: number;
+    consistency: number;
+  };
+  strategyTimeline: Array<{
+    id: string;
+    label: string;
+    why: string;
+    confidenceChange: number;
+    date: string;
+  }>;
+}
 
-export type AttemptDetail = {
-  attempt: Attempt;
+export interface IntakeFormState {
+  examLabel: string;
+  goal: GoalFocus;
+  nextMockDays: string;
+  weeklyHours: string;
+  biggestStruggle: string;
+}
+
+export interface TuneStrategyAnswers {
+  timeSplitKnown: "yes" | "no";
+  timeSink: string;
+  mocksPerWeek: string;
+  stressLevel: string;
+  weakestTags: string[];
+}
+
+export interface CogniverseState {
   report: Report;
-  profile?: StudentProfile | null;
-  action_state: ActionState[];
-  actionState?: ActionState[];
-  delta_from_previous?: {
-    previous_attempt_id: string;
-    previousAttemptId?: string;
-    summary: string;
-    changes: string[];
-  } | null;
-  deltaFromPrevious?: {
-    previous_attempt_id: string;
-    summary: string;
-    changes: string[];
-  } | null;
-};
+  intake: IntakeFormState;
+  tunedAnswers?: TuneStrategyAnswers;
+}
