@@ -1096,11 +1096,10 @@ export async function upsertActionState(params: {
         userId: params.userId,
         attemptId: params.attemptId,
         actionId: params.actionId,
-        title: params.title,
+        title: params.title,     // ✅ set once, on insert
         createdAt: now,
       },
       $set: {
-        title: params.title,
         status: params.status,
         reflection: params.reflection?.trim() || "",
         completedAt,
@@ -1110,8 +1109,13 @@ export async function upsertActionState(params: {
     { upsert: true }
   );
 
-  return col.findOne({ userId: params.userId, attemptId: params.attemptId, actionId: params.actionId });
+  return col.findOne({
+    userId: params.userId,
+    attemptId: params.attemptId,
+    actionId: params.actionId,
+  });
 }
+
 
 export async function getActionSummaryForAttempt(attemptId: string) {
   const db = await getDb();
