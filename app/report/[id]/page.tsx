@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -119,19 +120,31 @@ function bandTone(band: string) {
 }
 
 function missingSignalLabels(missingSignals: string[]) {
-  return missingSignals.map((signal) => SIGNAL_LABELS[signal] || signal.replaceAll("_", " "));
+  return missingSignals.map(
+    (signal) => SIGNAL_LABELS[signal] || signal.replaceAll("_", " ")
+  );
 }
 
-export default function ReportPage({ params }: { params: { id: string } }) {
+export default function ReportPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const router = useRouter();
-  const reportId = params.id;
+
+  // ✅ Next.js App Router: params is async in Client Components
+  const { id: reportId } = React.use(params);
 
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<ReportPayload | null>(null);
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [followupAnswers, setFollowupAnswers] = useState<Record<string, string>>({});
-  const [completedActions, setCompletedActions] = useState<Record<string, boolean>>({});
+  const [followupAnswers, setFollowupAnswers] = useState<Record<string, string>>(
+    {}
+  );
+  const [completedActions, setCompletedActions] = useState<
+    Record<string, boolean>
+  >({});
 
   const isSample = reportId === "sample";
 
@@ -163,7 +176,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
       }
 
       try {
-        const res = await fetchWithTimeout(`/api/report/${reportId}`, { timeoutMs: 8000 });
+        const res = await fetchWithTimeout(`/api/report/${reportId}`, {
+          timeoutMs: 8000,
+        });
         const json = await readJsonSafely<ReportPayload & { error?: string }>(res);
 
         if (!json) throw new Error("Report response was empty.");
@@ -176,7 +191,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
           isAbortError(error)
             ? "This report is taking longer than expected. Please retry."
             : withFriendlyTimeoutMessage(
-                error instanceof Error ? error.message : "Failed to load report.",
+                error instanceof Error
+                  ? error.message
+                  : "Failed to load report.",
                 "This report is taking longer than expected. Please retry."
               );
         toast.error(message);
@@ -200,7 +217,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
     fetchWithTimeout("/api/history?limit=6", { timeoutMs: 8000 })
       .then(async (res) => {
-        const json = await readJsonSafely<{ items?: HistoryItem[] } & { error?: string }>(res);
+        const json = await readJsonSafely<
+          { items?: HistoryItem[] } & { error?: string }
+        >(res);
         if (!active) return;
         if (!res.ok) throw new Error(json?.error || "Failed to load history.");
         setHistoryItems(Array.isArray(json?.items) ? json.items : []);
@@ -242,7 +261,8 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   const completionRate = useMemo(() => {
     const actions = report?.next_actions || [];
     if (!actions.length) return 0;
-    const doneCount = actions.filter((action: any) => completedActions[action.title]).length;
+    const doneCount = actions.filter((action: any) => completedActions[action.title])
+      .length;
     return Math.round((doneCount / actions.length) * 100);
   }, [completedActions, report?.next_actions]);
 
@@ -264,7 +284,10 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     if (!reportData || isSample) return;
-    trackEvent("ui_viewed_report", { attemptId: reportId, metadata: { exam: reportData.exam } });
+    trackEvent("ui_viewed_report", {
+      attemptId: reportId,
+      metadata: { exam: reportData.exam },
+    });
   }, [reportData, reportId, isSample]);
 
   async function exportReport() {
@@ -280,7 +303,10 @@ export default function ReportPage({ params }: { params: { id: string } }) {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      trackEvent("export_clicked", { attemptId: reportId, metadata: { format: "json" } });
+      trackEvent("export_clicked", {
+        attemptId: reportId,
+        metadata: { format: "json" },
+      });
     } catch {
       toast.error("Export failed. Please retry.");
     }
@@ -342,7 +368,11 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             title="We couldn't load this report"
             description="The report may have expired or the server is temporarily unavailable."
             action={
-              <Button type="button" variant="outline" onClick={() => onNavigate("/", "retry_upload")}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onNavigate("/", "retry_upload")}
+              >
                 Upload another attempt
               </Button>
             }
@@ -366,7 +396,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
           <Badge variant="outline" className="capitalize">
             Confidence: {confidenceBand}
           </Badge>
-          {confidenceScore !== null ? <Badge variant="outline">Score: {confidenceScore}</Badge> : null}
+          {confidenceScore !== null ? (
+            <Badge variant="outline">Score: {confidenceScore}</Badge>
+          ) : null}
           <Button variant="outline" onClick={exportReport} className="gap-2">
             <Download className="h-4 w-4" /> Export JSON
           </Button>
@@ -388,7 +420,12 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             <p className="text-base text-slate-900">{report.summary}</p>
 
             <div className="grid gap-3 md:grid-cols-3">
-              <StatPill label="Input quality" value={`${qualityScore}%`} hint={`Signal coverage is ${qualityLevel}.`} tone={bandTone(qualityLevel)} />
+              <StatPill
+                label="Input quality"
+                value={`${qualityScore}%`}
+                hint={`Signal coverage is ${qualityLevel}.`}
+                tone={bandTone(qualityLevel)}
+              />
               <StatPill
                 label="Top bottleneck"
                 value={topBottleneck || "Not enough data yet"}
@@ -406,7 +443,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             {missingLabels.length ? (
               <EmptyState
                 title="Signals still missing"
-                description={`Add these for higher-confidence strategy: ${missingLabels.join(", ")}.`}
+                description={`Add these for higher-confidence strategy: ${missingLabels.join(
+                  ", "
+                )}.`}
               />
             ) : null}
 
@@ -429,7 +468,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-sm text-muted-foreground">Not enough data yet.</div>
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    Not enough data yet.
+                  </div>
                 )}
               </div>
 
@@ -454,7 +495,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-sm text-muted-foreground">Not enough data yet.</div>
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    Not enough data yet.
+                  </div>
                 )}
               </div>
             </div>
@@ -467,7 +510,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             />
             <Accordion type="multiple" defaultValue={allSections} className="space-y-3">
               <AccordionItem value="patterns" className="rounded-xl border px-4">
-                <AccordionTrigger className="py-3 text-base font-semibold">Patterns</AccordionTrigger>
+                <AccordionTrigger className="py-3 text-base font-semibold">
+                  Patterns
+                </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <p className="mb-3 text-sm text-muted-foreground">
                     These are the repeatable behaviors affecting your score the most.
@@ -501,7 +546,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               </AccordionItem>
 
               <AccordionItem value="actions" className="rounded-xl border px-4">
-                <AccordionTrigger className="py-3 text-base font-semibold">Next actions</AccordionTrigger>
+                <AccordionTrigger className="py-3 text-base font-semibold">
+                  Next actions
+                </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <p className="mb-3 text-sm text-muted-foreground">
                     Complete these before the next mock. Progress saves locally on this device.
@@ -512,7 +559,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                         <div key={`${action.title}-${idx}`} className="rounded-xl border p-4">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div className="space-y-1">
-                              <div className="text-sm font-semibold text-slate-900">{action.title}</div>
+                              <div className="text-sm font-semibold text-slate-900">
+                                {action.title}
+                              </div>
                               <div className="text-xs text-muted-foreground">
                                 {action.duration} · {action.expected_impact}
                               </div>
@@ -545,14 +594,18 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               </AccordionItem>
 
               <AccordionItem value="strategy" className="rounded-xl border px-4">
-                <AccordionTrigger className="py-3 text-base font-semibold">Strategy</AccordionTrigger>
+                <AccordionTrigger className="py-3 text-base font-semibold">
+                  Strategy
+                </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <p className="mb-3 text-sm text-muted-foreground">
                     Use this as your execution script during the next attempt.
                   </p>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="rounded-xl border p-4">
-                      <div className="text-xs font-semibold text-muted-foreground">Attempt script</div>
+                      <div className="text-xs font-semibold text-muted-foreground">
+                        Attempt script
+                      </div>
                       <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-900">
                         {report.strategy?.next_mock_script?.length ? (
                           report.strategy.next_mock_script.map((item: string, idx: number) => (
@@ -564,7 +617,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                       </ul>
                     </div>
                     <div className="rounded-xl border p-4">
-                      <div className="text-xs font-semibold text-muted-foreground">Attempt rules</div>
+                      <div className="text-xs font-semibold text-muted-foreground">
+                        Attempt rules
+                      </div>
                       <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-900">
                         {report.strategy?.attempt_rules?.length ? (
                           report.strategy.attempt_rules.map((rule: string, idx: number) => (
@@ -580,13 +635,17 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               </AccordionItem>
 
               <AccordionItem value="history" className="rounded-xl border px-4">
-                <AccordionTrigger className="py-3 text-base font-semibold">History & delta</AccordionTrigger>
+                <AccordionTrigger className="py-3 text-base font-semibold">
+                  History & delta
+                </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <p className="mb-3 text-sm text-muted-foreground">
                     We compare this attempt against recent history when it is available.
                   </p>
                   {historyLoading ? (
-                    <div className="text-sm text-muted-foreground">Loading recent attempts…</div>
+                    <div className="text-sm text-muted-foreground">
+                      Loading recent attempts…
+                    </div>
                   ) : attemptsTracked >= 2 ? (
                     <div className="grid gap-3 md:grid-cols-3">
                       <StatPill
@@ -596,7 +655,11 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                       />
                       <StatPill
                         label="Focus delta"
-                        value={deltaFocus != null ? `${deltaFocus > 0 ? "+" : ""}${deltaFocus}` : "0"}
+                        value={
+                          deltaFocus != null
+                            ? `${deltaFocus > 0 ? "+" : ""}${deltaFocus}`
+                            : "0"
+                        }
                         hint="Change vs previous attempt."
                         tone={deltaFocus != null && deltaFocus > 0 ? "positive" : "default"}
                       />
@@ -616,7 +679,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               </AccordionItem>
 
               <AccordionItem value="followups" className="rounded-xl border px-4">
-                <AccordionTrigger className="py-3 text-base font-semibold">Follow-ups</AccordionTrigger>
+                <AccordionTrigger className="py-3 text-base font-semibold">
+                  Follow-ups
+                </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <p className="mb-3 text-sm text-muted-foreground">
                     Answering follow-ups reduces assumptions and improves input quality.
@@ -656,7 +721,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               </AccordionItem>
 
               <AccordionItem value="facts" className="rounded-xl border px-4">
-                <AccordionTrigger className="py-3 text-base font-semibold">Facts</AccordionTrigger>
+                <AccordionTrigger className="py-3 text-base font-semibold">
+                  Facts
+                </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <p className="mb-3 text-sm text-muted-foreground">
                     These metrics come directly from your scorecard text.
@@ -681,7 +748,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               </AccordionItem>
 
               <AccordionItem value="inferences" className="rounded-xl border px-4">
-                <AccordionTrigger className="py-3 text-base font-semibold">Inferences</AccordionTrigger>
+                <AccordionTrigger className="py-3 text-base font-semibold">
+                  Inferences
+                </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <p className="mb-3 text-sm text-muted-foreground">
                     Hypotheses are confidence-banded so you know what to verify.
@@ -711,10 +780,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
         <div className="space-y-4 lg:sticky lg:top-6 lg:self-start">
           <SectionCard contentClassName="space-y-3">
-            <SectionHeader
-              title="Next actions"
-              description="Your execution checklist for the next mock."
-            />
+            <SectionHeader title="Next actions" description="Your execution checklist for the next mock." />
             <div className="grid gap-2">
               <div className="rounded-xl border p-3">
                 <div className="text-xs text-muted-foreground">Completion</div>
@@ -744,11 +810,16 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 />
               )}
             </div>
+
             <div className="grid gap-2">
-              <Button variant="outline" type="button" onClick={() => onNavigate("/history", "view_history") }>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => onNavigate("/history", "view_history")}
+              >
                 <ClipboardList className="mr-2 h-4 w-4" /> View attempt history
               </Button>
-              <Button type="button" className="gap-2" onClick={() => onNavigate("/", "upload_next_attempt") }>
+              <Button type="button" className="gap-2" onClick={() => onNavigate("/", "upload_next_attempt")}>
                 Upload next attempt <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
