@@ -56,6 +56,15 @@ type FollowupAnswer = {
   value: string;
 };
 
+type StrategyProbe = {
+  id: string;
+  title: string;
+  description?: string;
+  tags?: string[];
+  done?: boolean;
+  doneAt?: string | null;
+};
+
 const EMPTY_REPORT = {
   summary: "No report data available.",
   facts: { metrics: [], notes: [] },
@@ -88,6 +97,15 @@ function actionSlug(title: string, idx: number) {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "") || `action-${idx + 1}`;
+  return base.slice(0, 64);
+}
+
+function probeSlug(title: string, idx: number) {
+  const base =
+    String(title || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") || `probe-${idx + 1}`;
   return base.slice(0, 64);
 }
 
@@ -344,6 +362,50 @@ export default function ReportPage({
   const consistencyScore = confidenceScore;
   const riskScore = confidenceScore != null ? Math.max(0, 100 - confidenceScore) : null;
 
+  const strategyPlan = report?.meta?.strategy_plan ?? null;
+  const planLevers = useMemo(
+    () => (Array.isArray(strategyPlan?.top_levers) ? strategyPlan.top_levers : []),
+    [strategyPlan]
+  );
+  const planRules = useMemo(
+    () => (Array.isArray(strategyPlan?.if_then_rules) ? strategyPlan.if_then_rules : []),
+    [strategyPlan]
+  );
+  const planDays = useMemo(
+    () => (Array.isArray(strategyPlan?.plan_days) ? strategyPlan.plan_days : []),
+    [strategyPlan]
+  );
+  const planAssumptions = useMemo(
+    () =>
+      Array.isArray(strategyPlan?.confidence?.assumptions)
+        ? strategyPlan.confidence.assumptions
+        : [],
+    [strategyPlan]
+  );
+
+  const strategyProbes = useMemo<StrategyProbe[]>(() => {
+    if (!planDays.length) return [];
+    return planDays.map((day: any, idx: number) => {
+      const dayNum = Number(day?.day) || idx + 1;
+      const dayTitle = String(day?.title || `Day ${dayNum}`).trim();
+      const tasks = Array.isArray(day?.tasks)
+        ? day.tasks.map((t: any) => String(t || "").trim()).filter(Boolean)
+        : [];
+      const minutes = Number(day?.minutes);
+      const minuteLabel = Number.isFinite(minutes) ? `${minutes} min` : null;
+      return {
+        id: `plan-day-${dayNum}-${probeSlug(dayTitle, idx)}`,
+        title: `Day ${dayNum}: ${dayTitle}`,
+        description:
+          tasks.length || minuteLabel
+            ? [minuteLabel, tasks.slice(0, 3).join(" • ")].filter(Boolean).join(" — ")
+            : undefined,
+        tags: ["strategy-plan", "day-plan"],
+        done: false,
+      };
+    });
+  }, [planDays]);
+
   useEffect(() => {
     if (!reportData || isSample) return;
     trackEvent("ui_viewed_report", {
@@ -351,6 +413,29 @@ export default function ReportPage({
       metadata: { exam: reportData.exam },
     });
   }, [reportData, reportId, isSample]);
+
+  useEffect(() => {
+    if (isSample || !reportData?.exam || !strategyProbes.length) return;
+    const seededKey = storageKey("cogniverse_probes_seeded", reportId);
+    if (loadStoredState(seededKey, false)) return;
+
+    fetchWithTimeout("/api/progress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        exam: reportData.exam,
+        probes: strategyProbes,
+      }),
+      timeoutMs: 8000,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to seed probes.");
+        saveStoredState(seededKey, true);
+      })
+      .catch(() => {
+        // best-effort seeding only; UI still renders the plan below
+      });
+  }, [isSample, reportData?.exam, reportId, strategyProbes]);
 
   async function exportReport() {
     try {
@@ -889,6 +974,109 @@ export default function ReportPage({
                       </ul>
                     </div>
                   </div>
+
+                  {planLevers.length ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Strategy levers (AI plan)
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        {planLevers.map((lever: any, idx: number) => (
+                          <div key={`lever-${idx}`} className="rounded-xl border p-3">
+                            <div className="text-sm font-semibold text-slate-900">
+                              {lever.title || `Lever ${idx + 1}`}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {lever.metric || "Metric pending"}
+                            </div>
+                            {Array.isArray(lever.do) && lever.do.length ? (
+                              <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-900">
+                                {lever.do.slice(0, 3).map((item: string, i: number) => (
+                                  <li key={`lever-do-${idx}-${i}`}>{item}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {planRules.length ? (
+                    <div className="mt-4 rounded-xl border p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        If–then rules
+                      </div>
+                      <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-900">
+                        {planRules.map((rule: string, idx: number) => (
+                          <li key={`plan-rule-${idx}`}>{rule}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {planAssumptions.length ? (
+                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                        Assumptions used by AI
+                      </div>
+                      <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-amber-900">
+                        {planAssumptions.map((assumption: string, idx: number) => (
+                          <li key={`assumption-${idx}`}>{assumption}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {planDays.length ? (
+                    <div className="mt-4 space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Day-wise plan
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {planDays.map((day: any, idx: number) => {
+                          const dayNum = Number(day?.day) || idx + 1;
+                          const tasks = Array.isArray(day?.tasks)
+                            ? day.tasks
+                                .map((t: any) => String(t || "").trim())
+                                .filter(Boolean)
+                            : [];
+                          const minutes = Number(day?.minutes);
+                          return (
+                            <div key={`plan-day-${dayNum}-${idx}`} className="rounded-xl border p-4">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm font-semibold text-slate-900">
+                                  Day {dayNum}
+                                </div>
+                                {Number.isFinite(minutes) ? (
+                                  <Badge variant="secondary">{minutes} min</Badge>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-sm text-slate-800">
+                                {day?.title || "Execution focus"}
+                              </div>
+                              {tasks.length ? (
+                                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                                  {tasks.map((task: string, tIdx: number) => (
+                                    <li key={`task-${dayNum}-${tIdx}`}>{task}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <div className="mt-2 text-xs text-muted-foreground">
+                                  Tasks will appear once the strategy plan includes them.
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="Day-wise plan unavailable"
+                      description="We only show this when the strategy plan is returned. Try uploading again if this stays empty."
+                    />
+                  )}
                 </AccordionContent>
               </AccordionItem>
 
