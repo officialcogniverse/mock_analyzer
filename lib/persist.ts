@@ -205,10 +205,13 @@ export async function upsertUser(userId: string) {
           style: "bullets",
         } satisfies CoachPersona,
         profile: {
-          preferredMockDay: null,
-          examAttempt: null,
-          focusArea: null,
-          studyGroup: null,
+          displayName: null,
+          targetExamLabel: null,
+          goal: "score",
+          nextMockDate: null,
+          dailyStudyMinutes: 60,
+          biggestStruggle: null,
+          timezone: "Asia/Kolkata",
         },
       },
       $set: { lastSeenAt: new Date() },
@@ -495,14 +498,30 @@ export async function listAttemptsForInsights(
     .project({ createdAt: 1, exam: 1, report: 1 })
     .toArray();
 
-  return rows.map((r) => ({
-    id: r._id.toString(),
-    // ✅ Stable serialization:
-    createdAt:
-      r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt || ""),
-    exam: r.exam,
-    report: r.report,
-  }));
+  return rows.map((r) => {
+    const report = r.report || {};
+    const meta = report?.meta && typeof report.meta === "object" ? report.meta : {};
+    const accuracyPct = parseAccuracy(report);
+    const confidence = Number.isFinite(Number(report?.confidence))
+      ? Math.max(0, Math.min(100, Number(report.confidence)))
+      : null;
+    const signalQuality = typeof report?.signal_quality === "string"
+      ? report.signal_quality
+      : typeof meta?.signal_quality === "string"
+      ? meta.signal_quality
+      : meta?.signal_quality?.band;
+
+    return {
+      id: r._id.toString(),
+      created_at:
+        r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt || ""),
+      exam: String(r.exam || "GENERIC").toUpperCase(),
+      confidence,
+      signal_quality: signalQuality || null,
+      primary_bottleneck: report?.primary_bottleneck || meta?.primary_bottleneck || null,
+      accuracy_pct: accuracyPct,
+    };
+  });
 }
 
 export async function listCohortAttempts(exam?: string | null, limit = 300) {
@@ -546,6 +565,66 @@ export async function updateUser(userId: string, patch: any) {
   );
 
   return users.findOne({ _id: userId });
+}
+
+function parseAccuracy(report: any): number | null {
+  const candidates = [
+    report?.accuracy_pct,
+    report?.accuracyPct,
+    report?.meta?.accuracy_pct,
+    report?.meta?.accuracyPct,
+    report?.meta?.scorecard?.accuracy_pct,
+  ];
+
+  for (const candidate of candidates) {
+    if (Number.isFinite(Number(candidate))) {
+      const value = Number(candidate);
+      return Math.max(0, Math.min(100, value));
+    }
+  }
+
+  const metrics = Array.isArray(report?.facts?.metrics) ? report.facts.metrics : [];
+  const accuracyMetric = metrics.find((m: any) =>
+    String(m?.label || "").toLowerCase().includes("accuracy")
+  );
+  if (accuracyMetric) {
+    const match = String(accuracyMetric.value || "").match(/(\d{1,3})/);
+    if (match) {
+      const value = Number(match[1]);
+      return Math.max(0, Math.min(100, value));
+    }
+  }
+
+  return null;
+}
+
+export function getUserProfileSignals(user: any) {
+  if (!user || typeof user !== "object") return null;
+  const profile = user.profile && typeof user.profile === "object" ? user.profile : {};
+  const displayName = String(user.displayName || profile.displayName || "").trim() || null;
+
+  const dailyStudyMinutes = Number(profile.dailyStudyMinutes);
+  return {
+    displayName,
+    targetExamLabel: profile.targetExamLabel ?? null,
+    goal: profile.goal ?? "score",
+    nextMockDate: profile.nextMockDate ?? null,
+    dailyStudyMinutes: Number.isFinite(dailyStudyMinutes)
+      ? Math.max(15, Math.min(300, dailyStudyMinutes))
+      : null,
+    biggestStruggle: profile.biggestStruggle ?? null,
+    timezone: profile.timezone ?? "Asia/Kolkata",
+  };
+}
+
+export function computePlanDaysFromProfile(profile: ReturnType<typeof getUserProfileSignals>) {
+  if (!profile?.nextMockDate) return null;
+  const date = new Date(profile.nextMockDate);
+  if (Number.isNaN(date.getTime())) return null;
+  const diffMs = date.getTime() - Date.now();
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  if (!Number.isFinite(diffDays)) return null;
+  return Math.max(3, Math.min(14, diffDays));
 }
 
 /**
@@ -956,31 +1035,42 @@ function actionSlug(title: string, idx: number) {
 export async function listActionStatesForAttempt(params: {
   userId: string;
   attemptId: string;
-  actionTitles: string[];
+  actionRefs: Array<{ id?: string; title: string }>;
 }) {
   const db = await getDb();
   const col = db.collection<ActionDoc>("actions");
 
-  const rows = await col
-    .find({ userId: params.userId, attemptId: params.attemptId })
-    .toArray();
+  const rows = await col.find({ userId: params.userId }).sort({ updatedAt: -1 }).toArray();
 
-  const byId = new Map(rows.map((row) => [row.actionId, row]));
+  const currentAttempt = rows.filter((row) => row.attemptId === params.attemptId);
+  const byId = new Map(currentAttempt.map((row) => [row.actionId, row]));
 
-  return params.actionTitles.map((title, idx) => {
-    const actionId = actionSlug(title, idx);
+  const latestCompletedById = new Map<string, ActionDoc>();
+  for (const row of rows) {
+    if (row.status !== "completed") continue;
+    if (!latestCompletedById.has(row.actionId)) latestCompletedById.set(row.actionId, row);
+  }
+
+  return params.actionRefs.map((ref, idx) => {
+    const actionId = String(ref.id || "").trim() || actionSlug(ref.title, idx);
     const existing = byId.get(actionId);
+    const carried = existing || latestCompletedById.get(actionId);
     return {
       actionId,
-      title,
-      status: existing?.status || "pending",
-      reflection: existing?.reflection || "",
+      title: ref.title,
+      status: existing?.status || carried?.status || "pending",
+      reflection: existing?.reflection || carried?.reflection || "",
       completedAt:
         existing?.completedAt instanceof Date
           ? existing.completedAt.toISOString()
           : existing?.completedAt
           ? String(existing.completedAt)
+          : carried?.completedAt instanceof Date
+          ? carried.completedAt.toISOString()
+          : carried?.completedAt
+          ? String(carried.completedAt)
           : null,
+      carriedForward: !existing && Boolean(carried),
     };
   });
 }

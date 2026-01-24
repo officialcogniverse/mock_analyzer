@@ -50,7 +50,7 @@ export function buildCoachContext(params: {
   attemptId: string;
   exam: string;
   report: any;
-  actionStates: Array<{ actionId: string; title: string; status: "pending" | "completed"; reflection?: string }>;
+  actionStates: Array<{ actionId?: string; id?: string; title: string; status: "pending" | "completed"; reflection?: string }>;
   previousAttempt?: { id: string; report: any } | null;
 }): CoachContext {
   const report = params.report || {};
@@ -96,7 +96,12 @@ export function buildCoachContext(params: {
     attemptId: params.attemptId,
     summary: String(report.summary || "No summary available."),
     patterns,
-    actions: params.actionStates,
+    actions: params.actionStates.map((action, idx) => ({
+      id: action.id || action.actionId || `action-${idx + 1}`,
+      title: action.title,
+      status: action.status,
+      reflection: action.reflection,
+    })),
     metrics,
     comparison,
   };

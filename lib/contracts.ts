@@ -17,7 +17,7 @@ export const AttemptSchema = z
     userId: z.string().min(6),
     exam: z.string().min(2),
     createdAt: z.string(),
-    report: z.record(z.any()),
+    report: z.record(z.string(), z.any()),
   })
   .strict();
 
@@ -103,7 +103,7 @@ export const EventSchema = z
   .object({
     event_name: z.string().min(2),
     attempt_id: z.string().optional(),
-    metadata: z.record(z.any()).optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
   })
   .strict();
 

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { attachSessionCookie, ensureSession } from "@/lib/session";
-import { listAttempts } from "@/lib/persist";
-import { AttemptSchema } from "@/lib/domain/schemas";
+import { listAttemptsForInsights } from "@/lib/persist";
 
 export const runtime = "nodejs";
 
@@ -14,19 +13,10 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const limitParam = Number(url.searchParams.get("limit") || "20");
-  const limit = Number.isFinite(limitParam) ? Math.min(50, Math.max(1, limitParam)) : 20;
+  const exam = String(url.searchParams.get("exam") || "").trim() || null;
+  const limit = Math.max(3, Math.min(24, Number(url.searchParams.get("limit") || 12)));
 
-  const rows = await listAttempts(session.userId, limit);
-  const attempts = rows.map((row) =>
-    AttemptSchema.parse({
-      id: row.id,
-      userId: session.userId,
-      createdAt: new Date(row.createdAt).toISOString(),
-      sourceType: "upload",
-      metrics: [],
-    })
-  );
+  const attempts = await listAttemptsForInsights(session.userId, exam, limit);
 
   const res = NextResponse.json({ attempts });
   if (session.isNew) attachSessionCookie(res, session);

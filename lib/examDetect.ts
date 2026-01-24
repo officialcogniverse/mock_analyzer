@@ -34,7 +34,7 @@ export function detectExamFromText(text: string): KnownExam | null {
     JEE: jeeHits,
   };
 
-  const best = (KNOWN_EXAMS as KnownExam[]).sort((a, b) => scores[b] - scores[a])[0];
+  const best = (KNOWN_EXAMS as unknown as KnownExam[]).sort((a, b) => scores[b] - scores[a])[0];
 
   if (scores[best] < 3) return null;
   return best;

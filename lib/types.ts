@@ -24,10 +24,35 @@ export type Intake = {
   preferred_topics?: string;
 };
 
+export type ProfileSignals = {
+  displayName?: string | null;
+  targetExamLabel?: string | null;
+  goal?: "score" | "accuracy" | "speed" | "concepts";
+  nextMockDate?: string | null;
+  dailyStudyMinutes?: number | null;
+  biggestStruggle?: string | null;
+  timezone?: string | null;
+};
+
+export type AttemptHistorySignal = {
+  id: string;
+  created_at: string;
+  exam: string;
+  confidence?: number | null;
+  signal_quality?: "low" | "medium" | "high" | null;
+  primary_bottleneck?: string | null;
+  accuracy_pct?: number | null;
+};
+
 export type AnalyzeInput = {
   exam: string;
   intake: Intake;
   text: string;
+  context?: {
+    profile?: ProfileSignals;
+    history?: AttemptHistorySignal[];
+    plan_days?: number;
+  };
 };
 
 /**

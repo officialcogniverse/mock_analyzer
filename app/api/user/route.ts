@@ -4,6 +4,12 @@ import { attachSessionCookie, ensureSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 
+function clampMinutes(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.max(15, Math.min(300, Math.round(numeric)));
+}
+
 export async function GET(req: Request) {
   const session = ensureSession(req);
 
@@ -27,26 +33,39 @@ export async function POST(req: Request) {
 
   await upsertUser(session.userId);
 
-  // only allow safe fields
   const patch: any = {};
 
   if (body.displayName !== undefined) {
     patch.displayName = String(body.displayName || "").trim() || null;
+    patch["profile.displayName"] = patch.displayName;
   }
   if (body.examDefault !== undefined) {
     patch.examDefault = String(body.examDefault || "").trim() || null;
   }
 
-  if (body.coach?.coach_name !== undefined) {
-    patch["coach.coach_name"] = String(body.coach.coach_name || "").trim() || "Prof. Astra";
+  if (body.profile?.targetExamLabel !== undefined) {
+    patch["profile.targetExamLabel"] = String(body.profile.targetExamLabel || "").trim() || null;
   }
-  if (body.coach?.tone !== undefined) {
-    patch["coach.tone"] = String(body.coach.tone || "calm");
+  if (body.profile?.goal !== undefined) {
+    const goal = String(body.profile.goal || "score").trim();
+    patch["profile.goal"] =
+      goal === "accuracy" || goal === "speed" || goal === "concepts" ? goal : "score";
   }
-  if (body.coach?.style !== undefined) {
-    patch["coach.style"] = String(body.coach.style || "bullets");
+  if (body.profile?.nextMockDate !== undefined) {
+    const raw = String(body.profile.nextMockDate || "").trim();
+    patch["profile.nextMockDate"] = raw || null;
+  }
+  if (body.profile?.dailyStudyMinutes !== undefined) {
+    patch["profile.dailyStudyMinutes"] = clampMinutes(body.profile.dailyStudyMinutes);
+  }
+  if (body.profile?.biggestStruggle !== undefined) {
+    patch["profile.biggestStruggle"] = String(body.profile.biggestStruggle || "").trim() || null;
+  }
+  if (body.profile?.timezone !== undefined) {
+    patch["profile.timezone"] = String(body.profile.timezone || "").trim() || "Asia/Kolkata";
   }
 
+  // Backward-compatible writes (no UI branching)
   if (body.profile?.preferredMockDay !== undefined) {
     patch["profile.preferredMockDay"] = String(body.profile.preferredMockDay || "").trim() || null;
   }

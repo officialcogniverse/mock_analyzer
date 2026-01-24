@@ -23,7 +23,7 @@ const probeSchema = z.object({
   doneAt: z.string().optional().nullable(),
 });
 
-const probeMetricsSchema = z.record(
+const probeMetricsSchema = z.record(z.string(),
   z.object({
     accuracy: z.number().optional(),
     time_min: z.number().optional(),
@@ -32,7 +32,7 @@ const probeMetricsSchema = z.record(
   })
 );
 
-const practiceMetricsSchema = z.record(
+const practiceMetricsSchema = z.record(z.string(),
   z.object({
     accuracy: z.number().optional(),
     time_min: z.number().optional(),

@@ -1,38 +1,21 @@
 import { z } from "zod";
 
+const bandEnum = z.enum(["low", "medium", "high"]);
+
 export const ReportSchema = z.object({
-  summary: z.string(),
-
-  facts: z.object({
-    metrics: z
-      .array(
-        z.object({
-          label: z.string(),
-          value: z.string(),
-          evidence: z.string(),
-        })
-      )
-      .default([]),
-    notes: z.array(z.string()).default([]),
-  }),
-
-  inferences: z
-    .array(
-      z.object({
-        hypothesis: z.string(),
-        confidence: z.enum(["low", "medium", "high"]),
-        evidence: z.string(),
-      })
-    )
-    .default([]),
+  signal_quality: bandEnum.default("medium"),
+  confidence: z.number().min(0).max(100).default(62),
+  primary_bottleneck: z.string().min(3),
+  summary: z.string().min(20),
 
   patterns: z
     .array(
       z.object({
-        title: z.string(),
-        evidence: z.string(),
-        impact: z.string(),
-        fix: z.string(),
+        title: z.string().min(3),
+        evidence: z.string().min(6),
+        impact: z.string().min(6),
+        fix: z.string().min(6),
+        severity: z.number().int().min(1).max(5).default(3),
       })
     )
     .max(6)
@@ -41,34 +24,79 @@ export const ReportSchema = z.object({
   next_actions: z
     .array(
       z.object({
-        title: z.string(),
-        duration: z.string(),
-        expected_impact: z.string(),
-        steps: z.array(z.string()).optional(),
+        title: z.string().min(3),
+        why: z.string().min(6),
+        duration_min: z.number().int().min(5).max(180),
+        difficulty: z.number().int().min(1).max(5),
+        steps: z.array(z.string()).min(1).max(6),
+        success_metric: z.string().min(6),
       })
     )
     .max(3)
     .default([]),
 
-  strategy: z.object({
-    next_mock_script: z.array(z.string()).min(3).max(8),
-    attempt_rules: z.array(z.string()).min(2).max(8),
+  plan: z.object({
+    days: z
+      .array(
+        z.object({
+          day_index: z.number().int().min(1),
+          label: z.string().min(3),
+          focus: z.string().min(6),
+          tasks: z
+            .array(
+              z.object({
+                action_id: z.string().optional(),
+                title: z.string().min(3),
+                duration_min: z.number().int().min(5).max(180),
+                note: z.string().optional(),
+              })
+            )
+            .min(1)
+            .max(6),
+        })
+      )
+      .min(3)
+      .max(14),
+  }),
+
+  probes: z
+    .array(
+      z.object({
+        title: z.string().min(3),
+        duration_min: z.number().int().min(5).max(90),
+        instructions: z.string().min(6),
+        success_check: z.string().min(6),
+      })
+    )
+    .min(3)
+    .max(5)
+    .default([]),
+
+  next_mock_strategy: z.object({
+    rules: z.array(z.string()).min(3).max(8),
+    time_checkpoints: z.array(z.string()).min(2).max(6),
+    skip_policy: z.array(z.string()).min(2).max(6),
+  }),
+
+  overall_exam_strategy: z.object({
+    weekly_rhythm: z.array(z.string()).min(3).max(7),
+    revision_loop: z.array(z.string()).min(3).max(7),
+    mock_schedule: z.array(z.string()).min(2).max(6),
   }),
 
   followups: z
     .array(
       z.object({
         id: z.string(),
-        question: z.string(),
-        type: z.enum(["single_select", "boolean", "text"]),
+        question: z.string().min(6),
+        type: z.enum(["single", "text"]),
         options: z.array(z.string()).optional(),
-        reason: z.string(),
       })
     )
     .max(4)
     .default([]),
 
-  meta: z.record(z.any()).optional(),
+  meta: z.record(z.string(), z.any()).optional(),
 });
 
 export type Report = z.infer<typeof ReportSchema>;

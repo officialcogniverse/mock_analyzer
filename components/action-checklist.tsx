@@ -13,10 +13,13 @@ type ActionChecklistProps = {
   state: ActionState[];
   onStateChange?: (next: ActionState[]) => void;
   className?: string;
+  title?: string;
+  subtitle?: string;
+  dense?: boolean;
 };
 
 function toStateMap(state: ActionState[]) {
-  return new Map(state.map((row) => [row.actionId, row]));
+  return new Map(state.map((row) => [row.action_id, row]));
 }
 
 function completionStats(actions: ReportAction[], stateMap: Map<string, ActionState>) {
@@ -24,7 +27,8 @@ function completionStats(actions: ReportAction[], stateMap: Map<string, ActionSt
   const completed = actions.filter((action) => stateMap.get(action.id)?.status === "completed").length;
   const pending = Math.max(0, total - completed);
   const completionRate = total ? Math.round((completed / total) * 100) : 0;
-  return { total, completed, pending, completionRate };
+  const totalMinutes = actions.reduce((sum, action) => sum + action.duration_min, 0);
+  return { total, completed, pending, completionRate, totalMinutes };
 }
 
 export function ActionChecklist({
@@ -33,6 +37,9 @@ export function ActionChecklist({
   state,
   onStateChange,
   className,
+  title = "Next actions",
+  subtitle = "Complete these before your next mock.",
+  dense = false,
 }: ActionChecklistProps) {
   const stateMap = useMemo(() => toStateMap(state), [state]);
   const stats = useMemo(() => completionStats(actions, stateMap), [actions, stateMap]);
@@ -55,7 +62,7 @@ export function ActionChecklist({
       if (!res.ok) {
         throw new Error(json?.error || "Failed to update action state.");
       }
-      const nextState = state.filter((row) => row.actionId !== action.id);
+      const nextState = state.filter((row) => row.action_id !== action.id);
       if (json?.actionState) {
         nextState.push(json.actionState);
       }
@@ -68,25 +75,23 @@ export function ActionChecklist({
   }
 
   return (
-    <Card className={cn("rounded-2xl border bg-white p-5 space-y-4", className)}>
+    <Card className={cn("rounded-2xl border bg-white p-5 space-y-4 shadow-sm", className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-slate-900">Next actions</p>
-          <p className="text-xs text-muted-foreground">
-            Complete the checklist to close the loop before your next attempt.
-          </p>
+          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="secondary" className="rounded-full">
             {stats.completed}/{stats.total} done
           </Badge>
           <Badge variant="outline" className="rounded-full">
-            {stats.completionRate}% completion
+            {stats.totalMinutes} min plan
           </Badge>
         </div>
       </div>
 
-      <div className="space-y-3">
+      <div className={cn("space-y-3", dense && "space-y-2")}> 
         {actions.map((action) => {
           const current = stateMap.get(action.id);
           const done = current?.status === "completed";
@@ -97,20 +102,20 @@ export function ActionChecklist({
               key={action.id}
               className={cn(
                 "rounded-xl border p-4 transition",
-                done ? "border-emerald-200 bg-emerald-50/60" : "bg-white"
+                done ? "border-emerald-200 bg-emerald-50/70" : "bg-white hover:border-slate-300"
               )}
             >
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-start gap-2">
                     <button
                       type="button"
                       onClick={() => markAction(action, done ? "pending" : "completed")}
                       disabled={isBusy}
                       className={cn(
-                        "flex h-5 w-5 items-center justify-center rounded-md border text-xs font-semibold",
+                        "mt-0.5 flex h-5 w-5 items-center justify-center rounded-md border text-xs font-semibold",
                         done
-                          ? "border-emerald-400 bg-emerald-500 text-white"
+                          ? "border-emerald-500 bg-emerald-500 text-white"
                           : "border-slate-300 text-slate-500"
                       )}
                       aria-pressed={done}
@@ -118,36 +123,56 @@ export function ActionChecklist({
                     >
                       {done ? "✓" : ""}
                     </button>
-                    <p className="text-sm font-semibold text-slate-900">{action.title}</p>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-900">{action.title}</p>
+                      <p className="text-xs text-muted-foreground">{action.why}</p>
+                    </div>
                   </div>
-                  {action.steps.length ? (
-                    <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                      {action.steps.slice(0, 3).map((step, idx) => (
-                        <li key={`${action.id}-step-${idx}`}>{step}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      No steps were provided. Focus on executing the action as described.
-                    </p>
-                  )}
+                  <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                    <Badge variant="secondary" className="rounded-full">
+                      {action.duration_min} min
+                    </Badge>
+                    <Badge variant="outline" className="rounded-full">
+                      Difficulty {action.difficulty}/5
+                    </Badge>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <Badge variant="secondary" className="rounded-full">
-                    {action.duration}
-                  </Badge>
-                  <Badge variant="outline" className="rounded-full">
-                    Impact: {action.expectedImpact}
-                  </Badge>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={isBusy}
-                    onClick={() => markAction(action, "skipped")}
-                  >
-                    Skip
-                  </Button>
+
+                {action.steps.length ? (
+                  <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                    {action.steps.slice(0, dense ? 2 : 4).map((step, idx) => (
+                      <li key={`${action.id}-step-${idx}`}>{step}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Execute the rule once in a timed drill before the next mock.
+                  </p>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="rounded-full bg-slate-50 px-3 py-1 text-slate-600">
+                    Success metric: {action.success_metric}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={isBusy}
+                      onClick={() => markAction(action, "pending")}
+                    >
+                      Reset
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={isBusy}
+                      onClick={() => markAction(action, "completed")}
+                    >
+                      Mark done
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>

@@ -173,12 +173,19 @@ intake=${safeText(input.intake)}
 strategy_meta=${safeText(meta)}
 
 REPORT (compact):
-${safeText({
-    summary: report?.summary,
-    patterns: report?.patterns,
-    next_actions: report?.next_actions,
-    strategy: report?.strategy,
-  }, 2400)}
+${safeText(
+    {
+      summary: report?.summary,
+      primary_bottleneck: report?.primary_bottleneck,
+      signal_quality: report?.signal_quality,
+      confidence: report?.confidence,
+      patterns: report?.patterns,
+      next_actions: report?.next_actions,
+      plan_days: report?.plan?.days?.length,
+      next_mock_strategy: report?.next_mock_strategy,
+    },
+    2600
+  )}
 
 Return JSON only matching the schema.
 `.trim();

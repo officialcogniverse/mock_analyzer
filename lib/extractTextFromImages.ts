@@ -16,6 +16,7 @@ export async function extractTextFromImages(files: Array<{ mime: string; data: B
   const inputImages = files.map((file) => ({
     type: "input_image" as const,
     image_url: toDataUrl(file),
+    detail: "low" as const,
   }));
 
   const response = await client.responses.create({

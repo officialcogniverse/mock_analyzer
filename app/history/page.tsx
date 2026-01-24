@@ -56,7 +56,7 @@ export default function HistoryPage() {
                     Attempt #{attempts.length - index}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDate(attempt.createdAt)} · {attempt.sourceType}
+                    {formatDate(attempt.createdAt || attempt.created_at)} · {attempt.sourceType || attempt.source_type}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">

@@ -5,6 +5,6 @@ export const EventPayloadSchema = z
   .object({
     event_name: EventNameSchema,
     attempt_id: z.string().min(1).optional(),
-    metadata: z.record(z.any()).optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
   })
   .strict();
