@@ -32,6 +32,34 @@ const probeMetricsSchema = z.record(
   })
 );
 
+const practiceMetricsSchema = z.record(
+  z.object({
+    accuracy: z.number().optional(),
+    time_min: z.number().optional(),
+    score: z.number().optional(),
+    notes: z.string().optional(),
+  })
+);
+
+const sectionTimingSchema = z.object({
+  section: z.string().min(1),
+  minutes: z.number().nullable(),
+  order: z.number().nullable().optional(),
+  source: z.enum(["manual", "ocr"]).optional(),
+});
+
+const reminderSchema = z.object({
+  time: z.string().optional().nullable(),
+  channel: z.enum(["whatsapp", "email", "sms", "push", "none"]).optional(),
+});
+
+const adherenceSchema = z.array(
+  z.object({
+    date: z.string().min(1),
+    done: z.boolean(),
+  })
+);
+
 const postSchema = z
   .object({
     exam: examSchema,
@@ -52,6 +80,14 @@ const postSchema = z
 
     // optional per-probe metrics (accuracy, time, etc.)
     probeMetrics: probeMetricsSchema.optional(),
+
+    // optional practice set metrics (accuracy, time, score)
+    practiceMetrics: practiceMetricsSchema.optional(),
+
+    // optional timing + reminders
+    sectionTimings: z.array(sectionTimingSchema).optional(),
+    reminder: reminderSchema.optional(),
+    planAdherence: adherenceSchema.optional(),
   })
   .strict();
 
@@ -114,7 +150,18 @@ export async function POST(req: Request) {
       return res;
     }
 
-    const { exam, probe, done, probes, probeMetrics, ...rest } = parsed.data;
+    const {
+      exam,
+      probe,
+      done,
+      probes,
+      probeMetrics,
+      practiceMetrics,
+      sectionTimings,
+      reminder,
+      planAdherence,
+      ...rest
+    } = parsed.data;
 
     await upsertUser(session.userId);
 
@@ -140,6 +187,10 @@ export async function POST(req: Request) {
       patch.minutesPerDay = rest.minutesPerDay;
     if (typeof rest.confidence === "number") patch.confidence = rest.confidence;
     if (probeMetrics) patch.probeMetrics = probeMetrics;
+    if (practiceMetrics) patch.practiceMetrics = practiceMetrics;
+    if (sectionTimings) patch.sectionTimings = sectionTimings;
+    if (reminder) patch.reminder = reminder;
+    if (planAdherence) patch.planAdherence = planAdherence;
 
     // ✅ allow seeding probes list
     if (Array.isArray(probes)) {

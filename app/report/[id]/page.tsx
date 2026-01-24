@@ -23,6 +23,9 @@ import {
   sampleProgressDoc,
   sampleReportPayload,
 } from "@/lib/sampleData";
+import { EXAM_SECTIONS, SECTION_TIME_TARGETS } from "@/lib/examSections";
+import { getPracticeSets } from "@/lib/practiceSets";
+import { type Exam } from "@/lib/exams";
 
 type ApiOk = {
   id: string;
@@ -115,6 +118,13 @@ type ProbeResultLocal = {
   notes?: string;
 };
 
+type PracticeMetric = {
+  accuracy?: number;
+  time_min?: number;
+  score?: number;
+  notes?: string;
+};
+
 type NextAction = {
   id: string;
   title: string;
@@ -138,6 +148,18 @@ type ProgressDoc = {
     tags?: string[];
   }>;
   probeMetrics?: Record<string, ProbeResultLocal>;
+  practiceMetrics?: Record<string, PracticeMetric>;
+  sectionTimings?: Array<{
+    section: string;
+    minutes: number | null;
+    order?: number | null;
+    source?: "manual" | "ocr";
+  }>;
+  reminder?: {
+    time?: string | null;
+    channel?: "whatsapp" | "email" | "sms" | "push" | "none";
+  };
+  planAdherence?: Array<{ date: string; done: boolean }>;
   confidence: number; // 0..100 (we will write computed value here)
   updatedAt?: string;
 };
@@ -164,6 +186,15 @@ export default function ReportPage() {
   const [probeMetrics, setProbeMetrics] = useState<
     Record<string, ProbeResultLocal>
   >({});
+
+  const localPracticeKey = useMemo(() => `cogniverse_practice_metrics_${id}`, [id]);
+  const [practiceMetrics, setPracticeMetrics] = useState<
+    Record<string, PracticeMetric>
+  >({});
+
+  const [sectionTimings, setSectionTimings] = useState<
+    Array<{ section: string; minutes: number | null; order?: number | null }>
+  >([]);
 
   // local booster answers (UI only for now)
   const [boostAnswers, setBoostAnswers] = useState<Record<string, string>>({});
@@ -199,6 +230,25 @@ export default function ReportPage() {
     } catch {}
   }, [localProbeKey, probeMetrics]);
 
+  // load local practice metrics
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(localPracticeKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") setPracticeMetrics(parsed);
+    } catch {}
+  }, [localPracticeKey]);
+
+  // persist local practice metrics
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(localPracticeKey, JSON.stringify(practiceMetrics));
+    } catch {}
+  }, [localPracticeKey, practiceMetrics]);
+
   // hydrate probe metrics from DB (merge to preserve local edits)
   useEffect(() => {
     if (!progressDoc?.probeMetrics) return;
@@ -208,11 +258,47 @@ export default function ReportPage() {
     }));
   }, [progressDoc?.probeMetrics]);
 
+  useEffect(() => {
+    if (!progressDoc?.practiceMetrics) return;
+    setPracticeMetrics((prev) => ({
+      ...progressDoc.practiceMetrics,
+      ...prev,
+    }));
+  }, [progressDoc?.practiceMetrics]);
+
+  useEffect(() => {
+    if (!progressDoc?.sectionTimings) return;
+    setSectionTimings(progressDoc.sectionTimings);
+  }, [progressDoc?.sectionTimings]);
+
   function setProbeMetric(probeId: string, patch: Partial<ProbeResultLocal>) {
     setProbeMetrics((prev) => ({
       ...prev,
       [probeId]: { ...(prev[probeId] || {}), ...patch },
     }));
+  }
+
+  function setPracticeMetric(setId: string, patch: Partial<PracticeMetric>) {
+    setPracticeMetrics((prev) => ({
+      ...prev,
+      [setId]: { ...(prev[setId] || {}), ...patch },
+    }));
+  }
+
+  function setSectionTiming(section: string, patch: { minutes?: number | null; order?: number | null }) {
+    setSectionTimings((prev) => {
+      const next = prev.slice();
+      const idx = next.findIndex((item) => item.section === section);
+      const base = idx >= 0 ? next[idx] : { section, minutes: null, order: null };
+      const updated = {
+        ...base,
+        minutes: patch.minutes !== undefined ? patch.minutes : base.minutes,
+        order: patch.order !== undefined ? patch.order : base.order,
+      };
+      if (idx >= 0) next[idx] = updated;
+      else next.push(updated);
+      return next;
+    });
   }
 
   // ------------------------
@@ -252,6 +338,59 @@ export default function ReportPage() {
   }, [id, isSample]);
 
   const r = data?.report;
+  const examKey = (data?.exam && EXAM_SECTIONS[data.exam as Exam]) ? (data.exam as Exam) : null;
+  const sectionSchema = examKey ? EXAM_SECTIONS[examKey] : [];
+
+  const practiceSets = useMemo(() => {
+    if (!examKey) return [];
+    return getPracticeSets(examKey, Array.isArray(r?.weaknesses) ? r.weaknesses : []);
+  }, [examKey, r?.weaknesses]);
+
+  const timingRules = useMemo(() => {
+    if (!examKey || !sectionSchema.length) return [];
+    const targets = SECTION_TIME_TARGETS[examKey] || {};
+    const rules: string[] = [];
+
+    sectionSchema.forEach((section) => {
+      const entry = sectionTimings.find((t) => t.section === section.label);
+      const minutes = entry?.minutes;
+      const target = targets[section.label];
+      if (minutes == null || !target) {
+        rules.push(`Log timing for ${section.label} to unlock pacing rules.`);
+        return;
+      }
+      if (minutes > target + 5) {
+        rules.push(
+          `${section.label}: you're +${Math.round(minutes - target)} min over target. Add checkpoints at ${Math.round(
+            target / 2
+          )} min.`
+        );
+      } else if (minutes < target - 5) {
+        rules.push(
+          `${section.label}: you're under target by ${Math.round(
+            target - minutes
+          )} min — consider spending more time on accuracy.`
+        );
+      } else {
+        rules.push(`${section.label}: pacing is on target (±5 min).`);
+      }
+    });
+
+    const sorted = sectionTimings
+      .filter((t) => typeof t.minutes === "number")
+      .slice()
+      .sort((a, b) => Number(b.minutes || 0) - Number(a.minutes || 0));
+    if (sorted.length) {
+      rules.push(
+        `Suggested section order: start with ${sorted[0].section} (most time spent), then ${sorted
+          .slice(1, 3)
+          .map((t) => t.section)
+          .join(", ") || "the remaining sections"}.`
+      );
+    }
+
+    return rules.slice(0, 6);
+  }, [examKey, sectionSchema, sectionTimings]);
 
   // ------------------------
   // Load insights + progress once exam is known
@@ -985,6 +1124,53 @@ const probes: Probe[] = useMemo(() => {
 
     return () => clearTimeout(t);
   }, [data?.exam, probeMetrics]);
+
+  // ✅ Persist practice metrics to DB (drill outcomes)
+  useEffect(() => {
+    if (!data?.exam) return;
+
+    const t = setTimeout(() => {
+      fetch("/api/progress", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          exam: data.exam,
+          practiceMetrics,
+        }),
+      })
+        .then((r) => r.json())
+        .then((j) => {
+          if (j?.progress) setProgressDoc(j.progress);
+        })
+        .catch(() => {});
+    }, 650);
+
+    return () => clearTimeout(t);
+  }, [data?.exam, practiceMetrics]);
+
+  // ✅ Persist section timing data for timing coach
+  useEffect(() => {
+    if (!data?.exam) return;
+    if (!sectionTimings.length) return;
+
+    const t = setTimeout(() => {
+      fetch("/api/progress", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          exam: data.exam,
+          sectionTimings,
+        }),
+      })
+        .then((r) => r.json())
+        .then((j) => {
+          if (j?.progress) setProgressDoc(j.progress);
+        })
+        .catch(() => {});
+    }, 700);
+
+    return () => clearTimeout(t);
+  }, [data?.exam, sectionTimings]);
 
   const nextMockStrategy = useMemo(() => {
     const base = Array.isArray(r?.next_mock_strategy)
@@ -1823,6 +2009,158 @@ const probes: Probe[] = useMemo(() => {
             );
           })}
         </Accordion>
+      </Card>
+
+      {/* Timing coach */}
+      <Card className="p-5 rounded-2xl space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold">⏱️ Adaptive timing coach</div>
+            <div className="text-sm text-muted-foreground">
+              Log per-section time (manual/OCR) to generate pacing rules + order guidance.
+            </div>
+          </div>
+          <Badge variant="secondary" className="rounded-full">
+            {sectionTimings.length || 0}/{sectionSchema.length} sections
+          </Badge>
+        </div>
+
+        {sectionSchema.length ? (
+          <div className="grid gap-3">
+            {sectionSchema.map((section) => {
+              const entry = sectionTimings.find((t) => t.section === section.label);
+              const targetMinutes = examKey ? SECTION_TIME_TARGETS[examKey]?.[section.label] : null;
+              return (
+                <div key={section.label} className="rounded-xl border bg-white p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium">{section.label}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Target: {targetMinutes ?? "--"} min
+                    </div>
+                  </div>
+                  <div className="mt-2 grid gap-2 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">Time spent (min)</div>
+                      <Input
+                        inputMode="numeric"
+                        value={entry?.minutes ?? ""}
+                        onChange={(e) =>
+                          setSectionTiming(section.label, {
+                            minutes: e.target.value ? Number(e.target.value) : null,
+                          })
+                        }
+                        placeholder="e.g., 38"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">Section order</div>
+                      <Input
+                        inputMode="numeric"
+                        value={entry?.order ?? ""}
+                        onChange={(e) =>
+                          setSectionTiming(section.label, {
+                            order: e.target.value ? Number(e.target.value) : null,
+                          })
+                        }
+                        placeholder="1, 2, 3..."
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground">
+            Section schema not available yet. Analyze a mock to unlock timing coach.
+          </div>
+        )}
+
+        {timingRules.length ? (
+          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+            {timingRules.map((rule, idx) => (
+              <li key={idx}>{rule}</li>
+            ))}
+          </ul>
+        ) : null}
+      </Card>
+
+      {/* Curated practice sets */}
+      <Card className="p-5 rounded-2xl space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold">📌 Curated practice sets</div>
+            <div className="text-sm text-muted-foreground">
+              Weakness → practice pack mapping with outcomes tracked for better strategy ranking.
+            </div>
+          </div>
+          <Badge variant="secondary" className="rounded-full">
+            {practiceSets.length} sets
+          </Badge>
+        </div>
+
+        <div className="grid gap-3">
+          {practiceSets.map((set) => {
+            const metrics = practiceMetrics[set.id] || {};
+            return (
+              <div key={set.id} className="rounded-xl border bg-white p-4 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium">{set.title}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {set.section} • {set.level} • {set.questions} Q • {set.minutes} min
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="rounded-full">
+                    {set.tags.join(", ")}
+                  </Badge>
+                </div>
+                <div className="text-sm text-muted-foreground">{set.description}</div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Accuracy (%)</div>
+                    <Input
+                      inputMode="numeric"
+                      value={metrics.accuracy ?? ""}
+                      onChange={(e) =>
+                        setPracticeMetric(set.id, {
+                          accuracy: e.target.value ? Number(e.target.value) : undefined,
+                        })
+                      }
+                      placeholder="e.g., 78"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Time (min)</div>
+                    <Input
+                      inputMode="numeric"
+                      value={metrics.time_min ?? ""}
+                      onChange={(e) =>
+                        setPracticeMetric(set.id, {
+                          time_min: e.target.value ? Number(e.target.value) : undefined,
+                        })
+                      }
+                      placeholder="e.g., 18"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Score (optional)</div>
+                    <Input
+                      inputMode="numeric"
+                      value={metrics.score ?? ""}
+                      onChange={(e) =>
+                        setPracticeMetric(set.id, {
+                          score: e.target.value ? Number(e.target.value) : undefined,
+                        })
+                      }
+                      placeholder="e.g., 9"
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </Card>
 
       {/* Study plan */}

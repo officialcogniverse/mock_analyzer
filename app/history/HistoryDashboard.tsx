@@ -44,6 +44,8 @@ type ProgressDoc = {
   minutesPerDay?: number;
   confidence?: number; // 0..100
   probes?: Array<{ id: string; title: string; done?: boolean; doneAt?: string }>;
+  reminder?: { time?: string | null; channel?: "whatsapp" | "email" | "sms" | "push" | "none" };
+  planAdherence?: Array<{ date: string; done: boolean }>;
 };
 
 type ProgressApiResponse = {
@@ -58,6 +60,14 @@ type NextAction = {
   expectedImpact: "High" | "Medium" | "Low";
   effort: string;
   evidence: string[];
+};
+
+type CohortInsights = {
+  cohortSize: number;
+  attemptsCount: number;
+  scoreBenchmarks: { p50: number | null; p75: number | null; p90: number | null };
+  commonMistakes: Record<string, number>;
+  progressVelocity: { averageDelta: number | null; positiveShare: number | null };
 };
 
 function toDayKey(d: Date) {
@@ -135,6 +145,17 @@ export default function HistoryDashboard() {
 
   const [nextActions, setNextActions] = useState<NextAction[]>([]);
   const [nextActionsLoading, setNextActionsLoading] = useState(false);
+
+  const [cohortInsights, setCohortInsights] = useState<CohortInsights | null>(null);
+  const [cohortLoading, setCohortLoading] = useState(false);
+
+  const [reminderTime, setReminderTime] = useState("");
+  const [reminderChannel, setReminderChannel] = useState<
+    "whatsapp" | "email" | "sms" | "push" | "none"
+  >("push");
+  const [planAdherence, setPlanAdherence] = useState<Array<{ date: string; done: boolean }>>(
+    []
+  );
 
   // profile modal fields
   const [name, setName] = useState("");
@@ -233,6 +254,27 @@ export default function HistoryDashboard() {
     }
   }
 
+  async function downloadExport(format: "csv" | "json") {
+    try {
+      const res = await fetch(`/api/export?format=${format}`);
+      if (!res.ok) {
+        toast.error("Export failed");
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `cogniverse_export.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Export failed");
+    }
+  }
+
   function resolveProgressExam(list: HistoryItem[], filter: ExamFilter): Exam | null {
     if (filter !== "ALL") return filter;
     const latestExam = normExam(list?.[0]?.exam);
@@ -243,6 +285,7 @@ export default function HistoryDashboard() {
     setLoading(true);
     setInsights(null);
     setProgressDoc(null);
+    setCohortInsights(null);
 
     try {
       const [histRes, userRes] = await Promise.all([
@@ -278,6 +321,14 @@ export default function HistoryDashboard() {
         if (prRes.ok) setProgressDoc(prJson.progress);
       }
 
+      setCohortLoading(true);
+      const cohortRes = await fetch(
+        `/api/cohort-insights?exam=${encodeURIComponent(exForInsights)}&limit=250`
+      );
+      const cohortJson = await cohortRes.json();
+      if (cohortRes.ok) setCohortInsights(cohortJson as CohortInsights);
+      setCohortLoading(false);
+
       // last report id fallback
       if (typeof window !== "undefined") {
         const latestId = String(list?.[0]?.id || "");
@@ -291,8 +342,10 @@ export default function HistoryDashboard() {
       setItems([]);
       setInsights(null);
       setProgressDoc(null);
+      setCohortInsights(null);
     } finally {
       setLoading(false);
+      setCohortLoading(false);
     }
   }
 
@@ -301,6 +354,54 @@ export default function HistoryDashboard() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionReady, examFilter]);
+
+  useEffect(() => {
+    if (!progressDoc) return;
+    setReminderTime(progressDoc.reminder?.time || "");
+    setReminderChannel(progressDoc.reminder?.channel || "push");
+    setPlanAdherence(progressDoc.planAdherence || []);
+  }, [progressDoc]);
+
+  async function saveReminder() {
+    if (!progressDoc?.exam) return;
+    try {
+      const res = await fetch("/api/progress", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          exam: progressDoc.exam,
+          reminder: { time: reminderTime || null, channel: reminderChannel },
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) setProgressDoc(json.progress);
+      else toast.error(json?.error || "Reminder save failed");
+    } catch {
+      toast.error("Reminder save failed");
+    }
+  }
+
+  async function togglePlanDay(date: string, done: boolean) {
+    if (!progressDoc?.exam) return;
+    const next = planAdherence.filter((d) => d.date !== date);
+    next.push({ date, done });
+    setPlanAdherence(next);
+
+    try {
+      const res = await fetch("/api/progress", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          exam: progressDoc.exam,
+          planAdherence: next,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) setProgressDoc(json.progress);
+    } catch {
+      // ignore for now
+    }
+  }
 
   // render-friendly picks (pattern)
   const trend = insights?.trend ? String(insights.trend) : "";
@@ -354,6 +455,26 @@ export default function HistoryDashboard() {
     [activeList, examFilter, progressExam]
   );
 
+  const adherenceMap = useMemo(() => {
+    return (planAdherence || []).reduce<Record<string, boolean>>((acc, item) => {
+      acc[item.date] = item.done;
+      return acc;
+    }, {});
+  }, [planAdherence]);
+
+  const upcomingDays = useMemo(() => {
+    const days: Array<{ key: string; label: string }> = [];
+    const today = new Date();
+    for (let i = 0; i < 3; i += 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+      days.push({ key, label });
+    }
+    return days;
+  }, []);
+
   useEffect(() => {
     if (!nextActionExam) {
       setNextActions([]);
@@ -399,6 +520,9 @@ export default function HistoryDashboard() {
             <Button variant="secondary" onClick={() => router.push("/")}>
               New analysis
             </Button>
+            <Button variant="outline" onClick={() => downloadExport("csv")}>
+              Export CSV
+            </Button>
 
             <Dialog>
               <DialogTrigger asChild>
@@ -434,6 +558,30 @@ export default function HistoryDashboard() {
 
                   <div className="text-xs text-muted-foreground">
                     Keep it minimal. No account needed.
+                  </div>
+
+                  <div className="pt-2 space-y-2">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">
+                      Data portability
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => downloadExport("json")}
+                      >
+                        Export JSON
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => downloadExport("csv")}
+                      >
+                        Export CSV
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </DialogContent>
@@ -662,6 +810,124 @@ export default function HistoryDashboard() {
                 Upload first mock
               </Button>
             )}
+          </Card>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <Card className="p-5 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-semibold">🌍 Cohort insights</div>
+              <Badge variant="secondary" className="rounded-full">
+                {examFilter === "ALL" ? "All exams" : examFilter}
+              </Badge>
+            </div>
+
+            {cohortLoading ? (
+              <div className="text-sm text-muted-foreground">Loading cohort trends…</div>
+            ) : !cohortInsights ? (
+              <div className="text-sm text-muted-foreground">
+                Not enough cohort data yet. Analyze more mocks to build benchmarks.
+              </div>
+            ) : (
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-xs uppercase text-muted-foreground">P50</div>
+                    <div className="text-lg font-semibold text-slate-900">
+                      {cohortInsights.scoreBenchmarks.p50 ?? "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-xs uppercase text-muted-foreground">P75</div>
+                    <div className="text-lg font-semibold text-slate-900">
+                      {cohortInsights.scoreBenchmarks.p75 ?? "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-xs uppercase text-muted-foreground">P90</div>
+                    <div className="text-lg font-semibold text-slate-900">
+                      {cohortInsights.scoreBenchmarks.p90 ?? "—"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(cohortInsights.commonMistakes || {}).map(([key, value]) => (
+                    <Badge key={key} variant="outline" className="rounded-full">
+                      {titleCase(key)} {value}%
+                    </Badge>
+                  ))}
+                </div>
+                <div>
+                  Velocity:{" "}
+                  <span className="font-medium text-slate-900">
+                    {cohortInsights.progressVelocity.averageDelta != null
+                      ? `${cohortInsights.progressVelocity.averageDelta > 0 ? "+" : ""}${
+                          cohortInsights.progressVelocity.averageDelta
+                        } pts`
+                      : "—"}
+                  </span>{" "}
+                  • Positive share:{" "}
+                  <span className="font-medium text-slate-900">
+                    {cohortInsights.progressVelocity.positiveShare != null
+                      ? `${cohortInsights.progressVelocity.positiveShare}%`
+                      : "—"}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Aggregated across {cohortInsights.cohortSize} learners.
+                </div>
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-5 rounded-2xl space-y-3">
+            <div className="text-lg font-semibold">🔔 Nudge + plan adherence</div>
+            <div className="text-sm text-muted-foreground">
+              Schedule daily reminders and track plan completion to reduce drop-off.
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Reminder time</div>
+                <Input
+                  type="time"
+                  value={reminderTime}
+                  onChange={(e) => setReminderTime(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Channel</div>
+                <Input
+                  value={reminderChannel}
+                  onChange={(e) =>
+                    setReminderChannel(
+                      (e.target.value as "whatsapp" | "email" | "sms" | "push" | "none") || "push"
+                    )
+                  }
+                  placeholder="push"
+                />
+              </div>
+            </div>
+            <Button type="button" variant="outline" onClick={saveReminder}>
+              Save reminder
+            </Button>
+            <div className="space-y-2">
+              {upcomingDays.map((day) => (
+                <div key={day.key} className="flex items-center justify-between rounded-xl border bg-white p-3">
+                  <div className="text-sm">{day.label}</div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={adherenceMap[day.key] ? "secondary" : "outline"}
+                    onClick={() => togglePlanDay(day.key, !adherenceMap[day.key])}
+                  >
+                    {adherenceMap[day.key] ? "Done" : "Mark done"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Countdown: {plannerDays ? `${plannerDays} days to next mock` : "Set next mock date in report."}
+            </div>
           </Card>
         </div>
 

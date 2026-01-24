@@ -51,6 +51,7 @@ type UserDoc = {
   _id: string;
   displayName: string | null;
   examDefault: string | null;
+  auth?: { email?: string | null };
   profile?: {
     preferredMockDay?: string | null;
     examAttempt?: string | null;
@@ -104,6 +105,11 @@ export default function LandingPage() {
   const [signInOpen, setSignInOpen] = useState(false);
   const [signInName, setSignInName] = useState("");
   const [signInExam, setSignInExam] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authCode, setAuthCode] = useState("");
+  const [devOtp, setDevOtp] = useState("");
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -136,6 +142,7 @@ export default function LandingPage() {
         setStudyGroup(u?.profile?.studyGroup || "");
         setSignInName(u?.displayName || "");
         setSignInExam(u?.examDefault || "");
+        setAuthEmail(u?.auth?.email || "");
       })
       .catch(() => {
         if (active) setUser(null);
@@ -214,13 +221,29 @@ export default function LandingPage() {
   }
 
   async function signIn() {
+    if (!authEmail || !authCode) {
+      toast.error("Enter email + OTP to continue.");
+      return;
+    }
     if (!sessionReady) {
       toast.error("Session not ready. Please refresh once.");
       return;
     }
-    setProfileSaving(true);
+    setOtpVerifying(true);
     try {
-      const res = await fetch("/api/user", {
+      const res = await fetch("/api/auth/otp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "verify",
+          email: authEmail,
+          code: authCode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "OTP verification failed");
+
+      const profileRes = await fetch("/api/user", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -228,17 +251,45 @@ export default function LandingPage() {
           examDefault: signInExam,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Sign-in failed");
-      setUser(data.user || null);
-      setProfileName(data.user?.displayName || "");
+      const profileData = await profileRes.json();
+      if (!profileRes.ok) throw new Error(profileData?.error || "Profile update failed");
+
+      setUser(profileData.user || data.user || null);
+      setProfileName(profileData.user?.displayName || "");
       setSignInOpen(false);
-      toast.success("Welcome back ✅");
+      toast.success("Signed in ✅");
       router.push("/history");
     } catch (error: any) {
       toast.error(error?.message || "Sign-in failed");
     } finally {
-      setProfileSaving(false);
+      setOtpVerifying(false);
+    }
+  }
+
+  async function sendOtp() {
+    if (!authEmail) {
+      toast.error("Enter your email first.");
+      return;
+    }
+    if (!sessionReady) {
+      toast.error("Session not ready. Please refresh once.");
+      return;
+    }
+    setOtpSending(true);
+    try {
+      const res = await fetch("/api/auth/otp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "send", email: authEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to send OTP");
+      setDevOtp(data?.devCode || "");
+      toast.success("OTP sent ✅ (check email or dev code)");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to send OTP");
+    } finally {
+      setOtpSending(false);
     }
   }
 
@@ -335,6 +386,37 @@ export default function LandingPage() {
                   </DialogHeader>
                   <div className="space-y-3">
                     <div className="space-y-1">
+                      <div className="text-sm font-medium">Email address</div>
+                      <Input
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="student@cogniverse.ai"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">One-time passcode</div>
+                      <div className="flex gap-2">
+                        <Input
+                          value={authCode}
+                          onChange={(e) => setAuthCode(e.target.value)}
+                          placeholder="6-digit code"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={sendOtp}
+                          disabled={otpSending}
+                        >
+                          {otpSending ? "Sending..." : "Send code"}
+                        </Button>
+                      </div>
+                      {devOtp ? (
+                        <div className="text-xs text-muted-foreground">
+                          Dev OTP: <span className="font-medium">{devOtp}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="space-y-1">
                       <div className="text-sm font-medium">Your name</div>
                       <Input
                         value={signInName}
@@ -353,13 +435,13 @@ export default function LandingPage() {
                     <Button
                       className="w-full"
                       onClick={signIn}
-                      disabled={profileSaving}
+                      disabled={otpVerifying}
                       type="button"
                     >
-                      {profileSaving ? "Signing in..." : "Continue to dashboard"}
+                      {otpVerifying ? "Verifying..." : "Continue to dashboard"}
                     </Button>
                     <div className="text-xs text-muted-foreground">
-                      This creates a local session so your profile and mocks stay connected.
+                      OTP sign-in keeps your history synced across devices.
                     </div>
                   </div>
                 </DialogContent>
@@ -409,19 +491,34 @@ export default function LandingPage() {
                     <label className="text-xs font-medium text-muted-foreground">
                       Student email
                     </label>
-                    <Input placeholder="student@cogniverse.ai" />
+                    <Input
+                      placeholder="student@cogniverse.ai"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                    />
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-muted-foreground">
                       One-time passcode
                     </label>
-                    <Input placeholder="6-digit code" />
+                    <Input
+                      placeholder="6-digit code"
+                      value={authCode}
+                      onChange={(e) => setAuthCode(e.target.value)}
+                    />
+                    {devOtp ? (
+                      <div className="text-xs text-muted-foreground">
+                        Dev OTP: <span className="font-medium">{devOtp}</span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button className="flex-1">Send code</Button>
-                  <Button variant="outline" className="flex-1">
-                    Create profile
+                  <Button className="flex-1" onClick={sendOtp} disabled={otpSending}>
+                    {otpSending ? "Sending..." : "Send code"}
+                  </Button>
+                  <Button variant="outline" className="flex-1" onClick={() => setSignInOpen(true)}>
+                    Verify & continue
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
