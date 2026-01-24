@@ -116,6 +116,9 @@ export default function LandingPage() {
   const [devOtp, setDevOtp] = useState("");
   const [otpSending, setOtpSending] = useState(false);
   const [otpVerifying, setOtpVerifying] = useState(false);
+  const [authMode, setAuthMode] = useState<"student" | "institute">("student");
+  const [instituteCode, setInstituteCode] = useState("");
+  const [instituteName, setInstituteName] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -260,6 +263,10 @@ export default function LandingPage() {
       toast.error("Enter email + OTP to continue.");
       return;
     }
+    if (authMode === "institute" && !instituteCode.trim()) {
+      toast.error("Institute code is required for institute login.");
+      return;
+    }
     if (!sessionReady) {
       toast.error("Session not ready. Please refresh once.");
       return;
@@ -273,6 +280,9 @@ export default function LandingPage() {
           action: "verify",
           email: authEmail,
           code: authCode,
+          mode: authMode,
+          instituteCode: instituteCode || undefined,
+          instituteName: instituteName || undefined,
         }),
       });
       const data = await res.json();
@@ -293,7 +303,7 @@ export default function LandingPage() {
       setProfileName(profileData.user?.displayName || "");
       setSignInOpen(false);
       toast.success("Signed in ✅");
-      router.push("/history");
+      router.push(authMode === "institute" ? "/institute" : "/history");
     } catch (error: any) {
       toast.error(error?.message || "Sign-in failed");
     } finally {
@@ -306,6 +316,10 @@ export default function LandingPage() {
       toast.error("Enter your email first.");
       return;
     }
+    if (authMode === "institute" && !instituteCode.trim()) {
+      toast.error("Enter your institute code first.");
+      return;
+    }
     if (!sessionReady) {
       toast.error("Session not ready. Please refresh once.");
       return;
@@ -315,7 +329,13 @@ export default function LandingPage() {
       const res = await fetch("/api/auth/otp", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "send", email: authEmail }),
+        body: JSON.stringify({
+          action: "send",
+          email: authEmail,
+          mode: authMode,
+          instituteCode: instituteCode || undefined,
+          instituteName: instituteName || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to send OTP");
@@ -429,7 +449,13 @@ export default function LandingPage() {
                 <Link href="/pricing">Pricing</Link>
               </Button>
               <Button variant="ghost" asChild>
-                <Link href="/privacy">Trust</Link>
+                <Link href="/trust">Trust</Link>
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/onboarding">Onboarding</Link>
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/settings">Settings</Link>
               </Button>
               <Button variant="ghost" onClick={() => router.push("/report/sample")}>
                 Sample report
@@ -443,6 +469,48 @@ export default function LandingPage() {
                     <DialogTitle>Sign in to sync your progress</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-3">
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">I am signing in as</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant={authMode === "student" ? "default" : "outline"}
+                          onClick={() => setAuthMode("student")}
+                        >
+                          Student
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={authMode === "institute" ? "default" : "outline"}
+                          onClick={() => setAuthMode("institute")}
+                        >
+                          Institute
+                        </Button>
+                      </div>
+                    </div>
+                    {authMode === "institute" ? (
+                      <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">Institute code</div>
+                          <Input
+                            value={instituteCode}
+                            onChange={(e) => setInstituteCode(e.target.value)}
+                            placeholder="fitjee-north-delhi"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">Institute name (admin only)</div>
+                          <Input
+                            value={instituteName}
+                            onChange={(e) => setInstituteName(e.target.value)}
+                            placeholder="FITJEE North Delhi"
+                          />
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          The same analyzer engine powers both student and institute workflows.
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="space-y-1">
                       <div className="text-sm font-medium">Email address</div>
                       <Input

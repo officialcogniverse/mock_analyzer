@@ -14,15 +14,18 @@ type InstituteStudent = {
   latestAttemptId: string;
   createdAt: string;
   exam: string;
+  scorePct: number | null;
   confidence: string;
   primaryBottleneck: string;
   actionCompletionRate: number;
+  riskFlag: "stagnant" | "watch" | "improving";
 };
 
 type RosterStudent = {
   id: string;
   name: string;
   notes: string;
+  studentUserId: string;
   createdAt: string;
 };
 
@@ -32,6 +35,9 @@ export default function InstitutePage() {
   const [roster, setRoster] = useState<RosterStudent[]>([]);
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
+  const [studentUserId, setStudentUserId] = useState("");
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [noteSavingId, setNoteSavingId] = useState("");
 
   async function loadData() {
     setLoading(true);
@@ -80,9 +86,11 @@ export default function InstitutePage() {
         "latestAttemptId",
         "createdAt",
         "exam",
+        "scorePct",
         "confidence",
         "primaryBottleneck",
         "actionCompletionRate",
+        "riskFlag",
       ];
       const rows = students.map((s) =>
         headers
@@ -113,7 +121,7 @@ export default function InstitutePage() {
     const res = await fetch("/api/institute/roster", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, notes }),
+      body: JSON.stringify({ name, notes, studentUserId }),
     });
     const json = await res.json();
 
@@ -124,7 +132,33 @@ export default function InstitutePage() {
 
     setName("");
     setNotes("");
+    setStudentUserId("");
     await loadData();
+  }
+
+  async function saveMentorNote(studentUserId: string) {
+    const note = String(noteDrafts[studentUserId] || "").trim();
+    if (!note) {
+      toast.error("Add a note before saving.");
+      return;
+    }
+
+    setNoteSavingId(studentUserId);
+    try {
+      const res = await fetch("/api/institute/notes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ studentUserId, note }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed to save note.");
+      toast.success("Mentor note saved.");
+      setNoteDrafts((prev) => ({ ...prev, [studentUserId]: "" }));
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to save note.");
+    } finally {
+      setNoteSavingId("");
+    }
   }
 
   return (
@@ -159,9 +193,12 @@ export default function InstitutePage() {
                     <tr className="text-left text-xs text-muted-foreground">
                       <th className="py-2">Student ID</th>
                       <th className="py-2">Latest attempt</th>
+                      <th className="py-2">Score %</th>
                       <th className="py-2">Confidence</th>
                       <th className="py-2">Bottleneck</th>
                       <th className="py-2">Actions done</th>
+                      <th className="py-2">Risk</th>
+                      <th className="py-2">Mentor note</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -171,6 +208,7 @@ export default function InstitutePage() {
                           {student.userId.slice(0, 10)}…
                         </td>
                         <td className="py-2">{new Date(student.createdAt).toLocaleDateString()}</td>
+                        <td className="py-2">{student.scorePct != null ? `${student.scorePct}%` : "—"}</td>
                         <td className="py-2">
                           <Badge variant="secondary">{student.confidence}</Badge>
                         </td>
@@ -178,6 +216,34 @@ export default function InstitutePage() {
                           {student.primaryBottleneck}
                         </td>
                         <td className="py-2">{student.actionCompletionRate}%</td>
+                        <td className="py-2">
+                          <Badge variant={student.riskFlag === "improving" ? "default" : "secondary"}>
+                            {student.riskFlag}
+                          </Badge>
+                        </td>
+                        <td className="py-2">
+                          <div className="flex min-w-[220px] gap-2">
+                            <Input
+                              value={noteDrafts[student.userId] || ""}
+                              onChange={(e) =>
+                                setNoteDrafts((prev) => ({
+                                  ...prev,
+                                  [student.userId]: e.target.value,
+                                }))
+                              }
+                              placeholder="Add mentor note"
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => saveMentorNote(student.userId)}
+                              disabled={noteSavingId === student.userId}
+                            >
+                              Save
+                            </Button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -204,6 +270,11 @@ export default function InstitutePage() {
                 placeholder="Student name"
               />
               <Input
+                value={studentUserId}
+                onChange={(e) => setStudentUserId(e.target.value)}
+                placeholder="Student user ID (optional, links attempts)"
+              />
+              <Input
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Notes (optional)"
@@ -217,6 +288,9 @@ export default function InstitutePage() {
                 {roster.map((student) => (
                   <div key={student.id} className="rounded-lg border px-3 py-2">
                     <div className="font-semibold">{student.name}</div>
+                    {student.studentUserId ? (
+                      <div className="text-xs text-slate-600">User: {student.studentUserId}</div>
+                    ) : null}
                     <div className="text-xs text-muted-foreground">{student.notes}</div>
                   </div>
                 ))}

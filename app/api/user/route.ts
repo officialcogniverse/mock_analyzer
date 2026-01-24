@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server";
 import { upsertUser, getUser, updateUser } from "@/lib/persist";
-import { attachUserIdCookie, ensureUserId } from "@/lib/session";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
 
   await upsertUser(session.userId);
   const user = await getUser(session.userId);
 
   const res = NextResponse.json({ user });
-  if (session.isNew) attachUserIdCookie(res, session.userId);
+  if (session.isNew) attachSessionCookie(res, session);
   return res;
 }
 
 export async function POST(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
 
   let body: any = {};
   try {
@@ -60,9 +60,26 @@ export async function POST(req: Request) {
     patch["profile.studyGroup"] = String(body.profile.studyGroup || "").trim() || null;
   }
 
+  if (body.settings?.targetScore !== undefined) {
+    const raw = String(body.settings.targetScore || "").trim();
+    patch["settings.targetScore"] = raw ? raw : null;
+  }
+  if (body.settings?.targetDate !== undefined) {
+    const raw = String(body.settings.targetDate || "").trim();
+    patch["settings.targetDate"] = raw ? raw : null;
+  }
+  if (body.settings?.examName !== undefined) {
+    const raw = String(body.settings.examName || "").trim();
+    patch["settings.examName"] = raw ? raw : null;
+  }
+  if (body.settings?.tier !== undefined) {
+    const raw = String(body.settings.tier || "").trim().toLowerCase();
+    patch["settings.tier"] = raw || "free";
+  }
+
   const user = await updateUser(session.userId, patch);
 
   const res = NextResponse.json({ user });
-  if (session.isNew) attachUserIdCookie(res, session.userId);
+  if (session.isNew) attachSessionCookie(res, session);
   return res;
 }

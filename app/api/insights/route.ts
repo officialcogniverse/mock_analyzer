@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { listAttemptsForInsights } from "@/lib/persist";
-import { attachUserIdCookie, ensureUserId } from "@/lib/session";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
 import { normalizeExam } from "@/lib/exams";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
+  if (session.mode !== "student") {
+    const res = NextResponse.json({ error: "Insights are student-only." }, { status: 403 });
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
+  }
 
   try {
     const url = new URL(req.url);
@@ -45,19 +50,19 @@ export async function GET(req: Request) {
         { error: data?.detail || data?.error || raw || "Python insights failed" },
         { status: 500 }
       );
-      if (session.isNew) attachUserIdCookie(errRes, session.userId);
+      if (session.isNew) attachSessionCookie(errRes, session);
       return errRes;
     }
 
     const okRes = NextResponse.json(data);
-    if (session.isNew) attachUserIdCookie(okRes, session.userId);
+    if (session.isNew) attachSessionCookie(okRes, session);
     return okRes;
   } catch (e: any) {
     const errRes = NextResponse.json(
       { error: e?.message || "Unknown error" },
       { status: 500 }
     );
-    if (session.isNew) attachUserIdCookie(errRes, session.userId);
+    if (session.isNew) attachSessionCookie(errRes, session);
     return errRes;
   }
 }

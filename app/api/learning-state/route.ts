@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { normalizeExam } from "@/lib/exams";
-import { attachUserIdCookie, ensureUserId } from "@/lib/session";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
 import { getUserLearningState, upsertUser } from "@/lib/persist";
 
 export const runtime = "nodejs";
@@ -12,7 +12,12 @@ const examSchema = z.string().optional();
  * GET /api/learning-state?exam=CAT
  */
 export async function GET(req: Request) {
-  const session = ensureUserId(req);
+  const session = ensureSession(req);
+  if (session.mode !== "student") {
+    const res = NextResponse.json({ error: "Learning state is student-only." }, { status: 403 });
+    if (session.isNew) attachSessionCookie(res, session);
+    return res;
+  }
   const url = new URL(req.url);
 
   const examRaw = url.searchParams.get("exam") || "";
@@ -36,6 +41,6 @@ export async function GET(req: Request) {
     },
   });
 
-  if (session.isNew) attachUserIdCookie(res, session.userId);
+  if (session.isNew) attachSessionCookie(res, session);
   return res;
 }

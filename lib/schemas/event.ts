@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { EventNameSchema } from "@/lib/events";
 
-export const EventPayloadSchema = z.object({
-  name: z.string(),
-  attemptId: z.string().optional(),
-  metadata: z.record(z.string(), z.any()).optional(),
-  createdAt: z.string().optional(),
-});
+export const EventPayloadSchema = z
+  .object({
+    event_name: EventNameSchema,
+    attempt_id: z.string().min(1).optional(),
+    metadata: z.record(z.any()).optional(),
+  })
+  .strict();
