@@ -6,15 +6,14 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ExamPatternChecklist } from "@/components/ExamPatternChecklist";
+import { SectionHeader } from "@/components/section-header";
+import { EmptyState } from "@/components/empty-state";
+import { LoadingCard } from "@/components/loading-card";
+import { ConfidenceBadge } from "@/components/confidence-badge";
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+  ActionChecklist,
+  type ActionChecklistItem,
+} from "@/components/action-checklist";
 import {
   sampleHistoryItems,
   sampleInsights,
@@ -23,15 +22,22 @@ import {
   sampleProgressDoc,
   sampleReportPayload,
 } from "@/lib/sampleData";
-import { EXAM_SECTIONS, SECTION_TIME_TARGETS } from "@/lib/examSections";
-import { getPracticeSets } from "@/lib/practiceSets";
-import { type Exam } from "@/lib/exams";
+import { NextActionSchema } from "@/lib/schema";
+import type { Insight, NextAction, Report } from "@/lib/types";
+import { toast } from "sonner";
+import {
+  ArrowRight,
+  ClipboardList,
+  Sparkles,
+  History,
+  Wand2,
+} from "lucide-react";
 
 type ApiOk = {
   id: string;
   createdAt: string;
   exam: string;
-  report: any;
+  report: Report;
 };
 
 type ApiErr = { error: string };
@@ -98,6 +104,17 @@ function curvePath(values: number[], width: number, height: number, padding = 16
     .join(" ");
 }
 
+function parseMinutes(value?: string) {
+  if (!value) return null;
+  const match = value.match(/\\d+/);
+  if (!match) return null;
+  return Number(match[0]);
+}
+
+function dayKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
 
 type ProbeType = "topic_drill" | "execution_drill" | "review_drill";
 
@@ -123,16 +140,6 @@ type PracticeMetric = {
   time_min?: number;
   score?: number;
   notes?: string;
-};
-
-type NextAction = {
-  id: string;
-  title: string;
-  steps: string[];
-  metric?: string;
-  expectedImpact: "High" | "Medium" | "Low";
-  effort: string;
-  evidence: string[];
 };
 
 type ProgressDoc = {
@@ -171,9 +178,8 @@ export default function ReportPage() {
 
   const [data, setData] = useState<ApiOk | null>(null);
   const [error, setError] = useState<string>("");
-  const [tabValue, setTabValue] = useState("summary");
 
-  const [insights, setInsights] = useState<any | null>(null);
+  const [insights, setInsights] = useState<Insight | null>(null);
   const [learningState, setLearningState] = useState<LearningState | null>(null);
   const [recentAttempts, setRecentAttempts] = useState<HistoryItem[]>([]);
 
@@ -338,59 +344,72 @@ export default function ReportPage() {
   }, [id, isSample]);
 
   const r = data?.report;
-  const examKey = (data?.exam && EXAM_SECTIONS[data.exam as Exam]) ? (data.exam as Exam) : null;
-  const sectionSchema = examKey ? EXAM_SECTIONS[examKey] : [];
+  const normalizedActions = useMemo<NextAction[]>(() => {
+    if (nextActions.length) return nextActions;
+    const fallback = Array.isArray(r?.top_actions) ? r.top_actions : [];
+    return fallback.map((title, index) => ({
+      id: `action_${index}`,
+      title,
+      expectedImpact: "Medium",
+      effort: "20 min",
+      why: "A focused step that unlocks quick gains.",
+      duration: "20 min",
+      difficulty: "Medium",
+    }));
+  }, [nextActions, r?.top_actions]);
 
-  const practiceSets = useMemo(() => {
-    if (!examKey) return [];
-    return getPracticeSets(examKey, Array.isArray(r?.weaknesses) ? r.weaknesses : []);
-  }, [examKey, r?.weaknesses]);
+  const actionChecklistItems = useMemo<ActionChecklistItem[]>(() => {
+    return normalizedActions.slice(0, 5).map((action) => ({
+      id: action.id,
+      title: action.title,
+      why:
+        action.why ||
+        action.evidence?.[0] ||
+        "This unlocks easy score gains with minimal effort.",
+      duration: action.duration || action.effort,
+      difficulty: action.difficulty || "Medium",
+      steps: action.steps,
+    }));
+  }, [normalizedActions]);
 
-  const timingRules = useMemo(() => {
-    if (!examKey || !sectionSchema.length) return [];
-    const targets = SECTION_TIME_TARGETS[examKey] || {};
-    const rules: string[] = [];
+  const reportConfidenceScore = Number(
+    r?.meta?.strategy?.confidence_score ??
+      r?.meta?.strategy_plan?.confidence?.score ??
+      progressDoc?.confidence ??
+      60
+  );
+  const reportConfidenceBand =
+    r?.meta?.strategy?.confidence_band ??
+    r?.meta?.strategy_plan?.confidence?.band ??
+    "medium";
 
-    sectionSchema.forEach((section) => {
-      const entry = sectionTimings.find((t) => t.section === section.label);
-      const minutes = entry?.minutes;
-      const target = targets[section.label];
-      if (minutes == null || !target) {
-        rules.push(`Log timing for ${section.label} to unlock pacing rules.`);
-        return;
-      }
-      if (minutes > target + 5) {
-        rules.push(
-          `${section.label}: you're +${Math.round(minutes - target)} min over target. Add checkpoints at ${Math.round(
-            target / 2
-          )} min.`
-        );
-      } else if (minutes < target - 5) {
-        rules.push(
-          `${section.label}: you're under target by ${Math.round(
-            target - minutes
-          )} min — consider spending more time on accuracy.`
-        );
-      } else {
-        rules.push(`${section.label}: pacing is on target (±5 min).`);
-      }
-    });
+  const patterns = useMemo(() => {
+    const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
+    return weaknesses.slice(0, 4).map((weakness) => ({
+      topic: weakness.topic,
+      reason: weakness.reason,
+      severity: weakness.severity,
+    }));
+  }, [r?.weaknesses]);
 
-    const sorted = sectionTimings
-      .filter((t) => typeof t.minutes === "number")
-      .slice()
-      .sort((a, b) => Number(b.minutes || 0) - Number(a.minutes || 0));
-    if (sorted.length) {
-      rules.push(
-        `Suggested section order: start with ${sorted[0].section} (most time spent), then ${sorted
-          .slice(1, 3)
-          .map((t) => t.section)
-          .join(", ") || "the remaining sections"}.`
-      );
-    }
-
-    return rules.slice(0, 6);
-  }, [examKey, sectionSchema, sectionTimings]);
+  const summaryText =
+    r?.summary ||
+    "We’re still learning your patterns. Add another mock for sharper insights.";
+  const scoreValue =
+    r?.estimated_score?.value != null ? Math.round(r.estimated_score.value) : null;
+  const scoreMax =
+    r?.estimated_score?.max != null ? Math.round(r.estimated_score.max) : null;
+  const scoreRange = Array.isArray(r?.estimated_score?.range)
+    ? r?.estimated_score?.range
+        ?.filter((val) => typeof val === "number")
+        .map((val) => Math.round(val))
+        .join("–")
+    : null;
+  const errorEntries = Object.entries(r?.error_types || {})
+    .map(([key, value]) => ({ key, value: Number(value || 0) }))
+    .filter((entry) => Number.isFinite(entry.value))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 4);
 
   // ------------------------
   // Load insights + progress once exam is known
@@ -475,7 +494,8 @@ export default function ReportPage() {
         );
         const json = await res.json();
         if (res.ok && active) {
-          setNextActions(Array.isArray(json?.actions) ? json.actions : []);
+          const parsed = NextActionSchema.array().safeParse(json?.actions || []);
+          setNextActions(parsed.success ? parsed.data : []);
         }
       } catch {
         // ignore
@@ -827,95 +847,25 @@ const learningUpdateLines = useMemo(() => {
   return lines.slice(0, 3);
 }, [probeAccuracyAvg, learningState?.rollingDeltaScorePct, plannedDays, minutesPerDay]);
 
-// --- Probe pack generation (deterministic, based on report) ---
+// --- Action checklist (seeded from next actions) ---
 const probes: Probe[] = useMemo(() => {
-  const weaknesses = Array.isArray(r?.weaknesses) ? r.weaknesses : [];
-  const topWeak = weaknesses.slice(0, 2).map((w: any, i: number) => {
-    const topic =
-      String(w?.topic || `Weakness ${i + 1}`).trim() ||
-      `Weakness ${i + 1}`;
-    const sev = Number(w?.severity || 3);
-    const mins = sev >= 4 ? 20 : 15;
-
-      return {
-        id: `topic_${i}_${topic.toLowerCase().replace(/\s+/g, "_").slice(0, 30)}`,
-        type: "topic_drill" as const,
-        title: `Topic drill: ${topic}`,
-        minutes: mins,
-        instructions: [
-          `Do a focused set on ${topic} (10–20 questions).`,
-          "Mark every wrong answer: why wrong? concept vs careless vs time.",
-          "Write 3 takeaway rules (what you’ll do differently next time).",
-        ],
-        targetAccuracy: 75,
-        why: "Topic drills rebuild accuracy on the weakest concepts.",
-      };
-    });
-
-    const errorTypes = r?.error_types || {};
-    const entries = Object.entries(errorTypes || {}).map(
-      ([k, v]) => [k, Number(v || 0)] as const
-    );
-    const dominant = entries.length
-      ? entries.sort((a, b) => (b[1] || 0) - (a[1] || 0))[0][0]
-      : "";
-
-    const execProbe: Probe = {
-      id: `exec_${String(dominant || "balanced")}`,
-      type: "execution_drill",
-      title:
-        dominant === "time"
-          ? "Execution drill: Time checkpoints"
-          : dominant === "careless"
-          ? "Execution drill: Accuracy checkpoints"
-          : dominant === "comprehension"
-          ? "Execution drill: Read-first, solve-second"
-          : "Execution drill: Balanced sprint",
-      minutes: 15,
-      instructions:
-        dominant === "time"
-          ? [
-              "Do a 12-minute sprint: solve 8–10 medium questions.",
-              "Checkpoint at 6 min: if stuck >60s, skip & return later.",
-              "Goal: controlled skipping (no late panic).",
-            ]
-          : dominant === "careless"
-          ? [
-              "Do a slow-accuracy set: 8–10 easy/medium questions.",
-              "Rule: before final answer, do a 5-second sanity check.",
-              "Goal: reduce silly errors without killing speed.",
-            ]
-          : dominant === "comprehension"
-          ? [
-              "Do 6–8 questions with strict method: Read → rephrase → solve.",
-              "Underline/mark key constraints before touching options.",
-              "Goal: prevent misreads and trap attempts.",
-            ]
-          : [
-              "Do a 10-minute sprint: 6–8 questions under a timer.",
-              "After each, tag your error type (if wrong).",
-              "Goal: stable execution under light time pressure.",
-            ],
-      targetAccuracy: 80,
-      why: "Execution drills reduce time pressure and careless drops.",
-    };
-
-    const reviewProbe: Probe = {
-      id: "review_mistakes",
-      type: "review_drill",
-      title: "Review drill: Error audit",
-      minutes: 15,
-      instructions: [
-        "Pick 6 wrong questions from your mock.",
-        "For each: write (1) why wrong, (2) correct method, (3) your rule.",
-        "Goal: convert mistakes into repeatable rules.",
-      ],
-      targetAccuracy: 85,
-      why: "Review drills lock corrections so the same errors don’t repeat.",
-    };
-
-    return [...topWeak, execProbe, reviewProbe].slice(0, 5);
-  }, [r]);
+  if (!actionChecklistItems.length) return [];
+  return actionChecklistItems.map((action) => ({
+    id: action.id,
+    type: "execution_drill" as const,
+    title: action.title,
+    minutes: parseMinutes(action.duration) || 20,
+    instructions:
+      action.steps?.length && action.steps[0]
+        ? action.steps
+        : [
+            "Work through the action with a timer on.",
+            "Write 1 takeaway you can reuse in the next mock.",
+          ],
+    targetAccuracy: 80,
+    why: action.why || "A focused action to unlock easy score gains.",
+  }));
+}, [actionChecklistItems]);
 
   // ✅ Map of done probes from DB
   const doneMap = useMemo(() => {
@@ -930,6 +880,35 @@ const probes: Probe[] = useMemo(() => {
     () => probes.filter((p) => doneMap[p.id]).length,
     [probes, doneMap]
   );
+
+  const probeMap = useMemo(() => {
+    const entries = probes.map((probe) => [probe.id, probe] as const);
+    return Object.fromEntries(entries);
+  }, [probes]);
+
+  const completedToday = useMemo(() => {
+    const today = dayKey(new Date());
+    const doneToday = (progressDoc?.probes || []).filter(
+      (probe) => probe.done && probe.doneAt && dayKey(new Date(probe.doneAt)) === today
+    );
+    const allowed = new Set(actionChecklistItems.map((item) => item.id));
+    return doneToday.filter((probe) => allowed.has(probe.id)).length;
+  }, [progressDoc, actionChecklistItems]);
+
+  const streakCount = useMemo(() => {
+    const completedDates = new Set(
+      (progressDoc?.probes || [])
+        .filter((probe) => probe.done && probe.doneAt)
+        .map((probe) => dayKey(new Date(probe.doneAt as string)))
+    );
+    let count = 0;
+    const cursor = new Date();
+    while (completedDates.has(dayKey(cursor))) {
+      count += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return count;
+  }, [progressDoc]);
 
   // ✅ OPTIONAL: Seed probe list into DB once (only if empty)
   useEffect(() => {
@@ -1267,1039 +1246,316 @@ const probes: Probe[] = useMemo(() => {
 
   if (error) {
     return (
-      <main className="min-h-screen p-6 flex justify-center items-center">
-        <Card className="p-6 w-full max-w-xl space-y-4">
-          <div className="text-lg font-semibold">Couldn’t load report</div>
-          <div className="text-sm text-muted-foreground">{error}</div>
-          <div className="flex gap-2">
-            <Button onClick={() => router.push("/")}>Back</Button>
-            <Button variant="secondary" onClick={() => location.reload()}>
-              Retry
-            </Button>
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Note: if you restarted dev server, old links can 404.
-          </div>
-        </Card>
+      <main className="min-h-screen bg-slate-50">
+        <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+          <EmptyState
+            title="Report not ready"
+            description={error}
+            icon={<ClipboardList className="h-5 w-5" />}
+            actionLabel="Back to upload"
+            onAction={() => router.push("/")}
+          />
+        </div>
       </main>
     );
   }
 
-  if (!data) return <div className="p-6">Loading...</div>;
+  if (!data) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+          <LoadingCard lines={4} />
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="min-h-screen p-6 flex justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-      <div className="w-full max-w-5xl grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="space-y-4">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-3xl font-bold">Performance Diagnosis & Action Plan</div>
-            <div className="text-sm text-muted-foreground">
-              Exam: <span className="font-medium">{data.exam}</span> •{" "}
-              <span className="font-medium">{vibe}</span>
-              {progressLoading ? (
-                <span className="ml-2 text-xs">• syncing…</span>
+    <main className="min-h-screen bg-slate-50">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 py-8 sm:px-6 lg:px-8">
+        <section className="space-y-4">
+          <SectionHeader
+            eyebrow="Report"
+            title={`${data.exam} mock summary`}
+            description="Cognitive snapshot + confidence badge so you know what to do next."
+            action={
+              <Button variant="outline" size="sm" onClick={() => router.push("/history")}>
+                View history
+              </Button>
+            }
+          />
+          <Card className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="rounded-full">
+                Attempt #{learningState?.attemptCount ?? 1}
+              </Badge>
+              <ConfidenceBadge score={reportConfidenceScore} band={reportConfidenceBand} />
+              {scoreRange ? (
+                <Badge variant="outline" className="rounded-full">
+                  Projected {scoreRange}
+                </Badge>
               ) : null}
             </div>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => router.push("/history")}>
-              Timeline
-            </Button>
-            <Button variant="secondary" onClick={() => router.push("/")}>
-              Analyze another
-            </Button>
-          </div>
-        </div>
+            <p className="mt-4 text-lg font-semibold text-slate-900">{summaryText}</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Estimated score
+                </p>
+                <p className="text-xl font-semibold text-slate-900">
+                  {scoreValue != null ? scoreValue : "—"}
+                  {scoreMax ? ` / ${scoreMax}` : ""}
+                </p>
+                <p className="text-xs text-muted-foreground">Confidence: {reportConfidenceBand}</p>
+              </div>
+              <div className="rounded-xl border bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Strongest signal
+                </p>
+                <p className="text-base font-semibold text-slate-900">
+                  {r?.strengths?.[0] || "Keep logging mocks for sharper signals"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Based on your latest attempt
+                </p>
+              </div>
+              <div className="rounded-xl border bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Focus XP
+                </p>
+                <p className="text-xl font-semibold text-slate-900">
+                  {r?.meta?.focusXP ?? "—"}
+                </p>
+                <p className="text-xs text-muted-foreground">Your weekly momentum</p>
+              </div>
+            </div>
+          </Card>
+        </section>
 
-        <Tabs value={tabValue} onValueChange={setTabValue} className="w-full">
-          <TabsList className="w-full">
-            <TabsTrigger value="summary" className="flex-1">
-              Summary
-            </TabsTrigger>
-            <TabsTrigger value="actions" className="flex-1">
-              Actions
-            </TabsTrigger>
-            <TabsTrigger value="evidence" className="flex-1">
-              Evidence
-            </TabsTrigger>
-          </TabsList>
-
-          {/* SUMMARY */}
-          <TabsContent value="summary" className="space-y-6">
-            <section className="grid gap-4 lg:grid-cols-3">
-              <Card className="p-5 rounded-2xl space-y-2">
-                <div className="text-sm text-muted-foreground">Next mock readiness</div>
-                <div className="text-3xl font-bold">{confidenceScore}</div>
-                <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>{confidenceLabel} confidence</span>
-                  <span>Target: {nextMockDateLabel}</span>
-                </div>
-                <Progress value={confidenceScore} />
-              </Card>
-
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">Learning curve</div>
-                  <Badge variant="secondary" className="rounded-full">
-                    {curveDelta >= 0 ? `+${curveDelta}` : curveDelta} XP
-                  </Badge>
-                </div>
-                <div className="h-24">
-                  {curveValues.length ? (
-                    <svg viewBox="0 0 320 120" className="w-full h-full">
-                      <defs>
-                        <linearGradient id={curveGradientId} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="rgb(99 102 241)" stopOpacity="0.35" />
-                          <stop offset="100%" stopColor="rgb(99 102 241)" stopOpacity="0" />
-                        </linearGradient>
-                      </defs>
-                      <path
-                        d={curvePath(curveValues, 320, 120)}
-                        fill="none"
-                        stroke="rgb(99 102 241)"
-                        strokeWidth="3"
-                      />
-                      <path
-                        d={`${curvePath(curveValues, 320, 120)} L 304 112 L 16 112 Z`}
-                        fill={`url(#${curveGradientId})`}
-                      />
-                    </svg>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">
-                      Upload more mocks to plot your curve.
-                    </div>
-                  )}
-                </div>
-                {scoreDeltaLabel ? (
-                  <div className="text-xs text-muted-foreground">
-                    Rolling delta: {scoreDeltaLabel}
-                  </div>
-                ) : null}
-              </Card>
-
-              <Card className="p-5 rounded-2xl space-y-2">
-                <div className="text-sm text-muted-foreground">Main mistake pattern</div>
-                <div className="text-lg font-semibold">
-                  {mainMistake?.label || "No dominant pattern yet"}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {mainMistake
-                    ? `${mainMistake.value}% of recent errors · ${mainMistake.detail}`
-                    : "Upload a few mocks to surface your dominant pattern."}
-                </div>
-                <div className="text-xs text-muted-foreground">{whyItMatters}</div>
-              </Card>
-            </section>
-
-            <section className="grid gap-4 lg:grid-cols-3">
-              <Card className="p-5 rounded-2xl space-y-2 lg:col-span-2">
-                <div className="text-sm text-muted-foreground">Storyline</div>
-                <div className="text-lg font-semibold">From mock → insight → next best action</div>
-                <div className="text-sm text-muted-foreground">{storyLine}</div>
-                <div className="text-xs text-muted-foreground">
-                  Loop: Upload → Diagnose → Probes → Next mock.
-                </div>
-              </Card>
-
-              <Card className="p-5 rounded-2xl space-y-2">
-                <div className="text-sm text-muted-foreground">Learning behavior signals</div>
-                <div className="flex flex-wrap gap-2">
-                  {lbChips.length ? (
-                    lbChips.map((chip) => (
-                      <Badge
-                        key={chip.label}
-                        variant={chip.variant ?? "secondary"}
-                        className="rounded-full"
-                      >
-                        {chip.label}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-sm text-muted-foreground">
-                      Add 2–3 mocks to surface cadence + responsiveness.
-                    </span>
-                  )}
-                </div>
-                <ul className="text-xs text-muted-foreground space-y-1">
-                  {learningUpdateLines.map((line, idx) => (
-                    <li key={idx}>{line}</li>
-                  ))}
-                </ul>
-              </Card>
-            </section>
-
-            <section className="grid gap-4 lg:grid-cols-2">
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="text-lg font-semibold">Next best actions</div>
-                {nextActions.length === 0 && !nextActionsLoading ? (
-                  <div className="text-sm text-muted-foreground">
-                    Run another mock to unlock personalized actions.
-                  </div>
-                ) : (
-                  <div className="grid gap-3">
-                    {nextActions.slice(0, 3).map((action, idx) => (
-                      <div key={action.id} className="rounded-xl border bg-white p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="font-medium">
-                            {idx + 1}. {action.title}
-                          </div>
-                          <Badge
-                            variant={action.expectedImpact === "High" ? "default" : "secondary"}
-                            className="rounded-full"
-                          >
-                            {action.expectedImpact}
-                          </Badge>
-                        </div>
-                        {action.metric ? (
-                          <div className="text-xs text-muted-foreground">
-                            Metric: {action.metric}
-                          </div>
-                        ) : null}
-                        {action.evidence?.length ? (
-                          <div className="text-xs text-muted-foreground mt-1">
-                            Evidence: {action.evidence.slice(0, 2).join(", ")}.
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Card>
-
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="text-lg font-semibold">Error hotspots</div>
-                <div className="space-y-3 text-sm text-muted-foreground">
-                  {errorTaxonomy.slice(0, 4).map((item) => (
-                    <div key={item.key}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-900">{item.label}</span>
-                        <span>{item.value}%</span>
-                      </div>
-                      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                        <div
-                          className="h-full bg-slate-900/70"
-                          style={{ width: `${item.value}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </section>
-
-            <section className="grid gap-4 lg:grid-cols-2">
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="text-lg font-semibold">Top insights</div>
-                <div className="space-y-3">
-                  {(r?.weaknesses || []).slice(0, 2).map((w: any, i: number) => (
-                    <div key={i} className="rounded-xl border p-4 bg-white">
-                      <div className="flex items-center justify-between">
-                        <div className="font-medium">{w.topic}</div>
-                        <Badge variant="secondary">Severity {w.severity}/5</Badge>
-                      </div>
-                      <div className="text-sm text-muted-foreground mt-1">
-                        {w.reason}
-                      </div>
-                    </div>
-                  ))}
-                  {(r?.weaknesses || []).length === 0 ? (
-                    <div className="text-sm text-muted-foreground">
-                      No weak spots detected yet. Upload more mock data for sharper insights.
-                    </div>
-                  ) : null}
-                </div>
-              </Card>
-
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-lg font-semibold">Signal coverage</div>
-                  {strategyMeta.missing?.length ? (
+        <section className="space-y-4">
+          <SectionHeader
+            title="Patterns"
+            description="The habits showing up across your mock."
+          />
+          {patterns.length ? (
+            <div className="grid gap-4 md:grid-cols-3">
+              {patterns.map((pattern) => (
+                <Card key={pattern.topic} className="rounded-2xl border bg-white p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-base font-semibold text-slate-900">{pattern.topic}</p>
                     <Badge variant="secondary" className="rounded-full">
-                      {strategyMeta.missing.length} missing signals
+                      Severity {pattern.severity}/5
                     </Badge>
-                  ) : (
-                    <Badge
-                      variant={strategyMeta.score < 70 ? "destructive" : "secondary"}
-                      className="rounded-full"
-                    >
-                      {strategyMeta.score < 70 ? "Low confidence" : "Signals complete"}
-                    </Badge>
-                  )}
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">{pattern.reason}</p>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="No patterns yet"
+              description="Upload another mock to surface clear patterns in your performance."
+              icon={<Sparkles className="h-5 w-5" />}
+              actionLabel="Analyze another mock"
+              onAction={() => router.push("/")}
+            />
+          )}
+
+          {errorEntries.length ? (
+            <Card className="rounded-2xl border bg-white p-5">
+              <div className="space-y-3">
+                <div className="text-sm font-semibold text-slate-900">
+                  Error split (micro view)
                 </div>
-                <div className="text-3xl font-bold">{strategyMeta.score}</div>
-                <Progress value={strategyMeta.score} />
-                <div className="text-xs text-muted-foreground">
-                  {strategyMeta.assumptions?.length
-                    ? strategyMeta.assumptions.slice(0, 2).join(" • ")
-                    : "Add more mocks to improve strategy confidence."}
+                <div className="grid gap-3 md:grid-cols-2">
+                  {errorEntries.map((entry) => (
+                    <div key={entry.key} className="rounded-xl border bg-white p-3">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-slate-900">
+                          {titleCase(entry.key)}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{entry.value}%</span>
+                      </div>
+                      <div className="mt-2">
+                        <Progress value={entry.value} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          ) : null}
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-[1fr_0.45fr]">
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <SectionHeader
+                title="Next best actions"
+                description="Three focused moves to lift your score this week."
+                action={
+                  <Button variant="outline" size="sm" onClick={() => router.push("/history")}
+                  >
+                    See timeline <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                }
+              />
+              {normalizedActions.length ? (
+                <div className="grid gap-4 md:grid-cols-3">
+                  {normalizedActions.slice(0, 3).map((action) => (
+                    <Card key={action.id} className="rounded-2xl border bg-white p-5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-base font-semibold text-slate-900">{action.title}</p>
+                        {action.expectedImpact ? (
+                          <Badge variant="secondary" className="rounded-full">
+                            {action.expectedImpact} impact
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {action.why || action.evidence?.[0] || "Small change, big payoff."}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                        {action.duration || action.effort ? (
+                          <Badge variant="outline" className="rounded-full">
+                            {action.duration || action.effort}
+                          </Badge>
+                        ) : null}
+                        {action.difficulty ? (
+                          <Badge variant="outline" className="rounded-full">
+                            {action.difficulty}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      {action.steps?.length ? (
+                        <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                          {action.steps.slice(0, 2).map((step, idx) => (
+                            <li key={idx}>{step}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="Actions are loading"
+                  description="We’ll surface your next best actions as soon as the report finishes."
+                  icon={<Wand2 className="h-5 w-5" />}
+                />
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <SectionHeader
+                title="Next mock strategy"
+                description="A quick script to carry into your next attempt."
+              />
+              <Card className="rounded-2xl border bg-white p-5">
+                {Array.isArray(r?.next_mock_strategy) && r?.next_mock_strategy.length ? (
+                  <ol className="space-y-2 text-sm text-slate-900">
+                    {r.next_mock_strategy.slice(0, 5).map((line, idx) => (
+                      <li key={idx} className="flex gap-2">
+                        <span className="text-xs font-semibold text-muted-foreground">{idx + 1}</span>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Log another mock to unlock your personalized next-mock script.
+                  </p>
+                )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => router.push("/")}
+                  >
+                    Upload another mock
+                  </Button>
                 </div>
               </Card>
-            </section>
+            </div>
 
-            <Accordion type="single" collapsible className="w-full">
-              <AccordionItem value="context">
-                <AccordionTrigger>Show report context</AccordionTrigger>
-                <AccordionContent className="space-y-4">
-                  <Card className="p-5 space-y-3 rounded-2xl">
-                    <div className="text-lg font-semibold">Snapshot</div>
-                    <div className="text-sm">{r?.summary}</div>
-                  </Card>
-                  <ExamPatternChecklist
-                    exam={data.exam}
-                    title="Exam pattern checklist"
-                    subtitle="Advice is aligned to the official format, timing, and marking."
-                  />
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-          </TabsContent>
-
-          {/* ACTIONS */}
-          <TabsContent value="actions" className="space-y-4">
-            {/* NEW: Strategy Plan V2 (if present) */}
-            {strategyPlan ? (
-              <Card className="p-5 rounded-2xl space-y-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-lg font-semibold">🚀 Strategy Playbook</div>
-                    <div className="text-sm text-muted-foreground">
-                      Constrained levers + rules for your next attempt.
-                    </div>
-                  </div>
-                  <Badge variant="secondary" className="rounded-full">
-                    {titleCase(String(strategyPlan?.confidence?.band || "medium"))} •{" "}
-                    {Number(strategyPlan?.confidence?.score ?? 50)}
-                  </Badge>
-                </div>
-
-                <div className="space-y-3">
-                  {(strategyPlan?.top_levers || []).map((lv: any, i: number) => (
-                    <div key={i} className="rounded-xl border bg-white p-4 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
+            <div className="space-y-4">
+              <SectionHeader
+                title="History + delta"
+                description="How your last attempts are trending."
+              />
+              <Card className="rounded-2xl border bg-white p-5">
+                {recentAttempts.length ? (
+                  <div className="space-y-3">
+                    {recentAttempts.slice(0, 4).map((attempt) => (
+                      <div key={attempt.id} className="flex items-center justify-between text-sm">
                         <div>
-                          <div className="font-semibold">{lv.title}</div>
-
-                          {detectedFrom ? (
-                            <div className="text-xs text-muted-foreground mt-1">
-                              Detected from: {detectedFrom}
-                            </div>
-                          ) : null}
-                         </div>
-
+                          <p className="font-medium text-slate-900">{attempt.summary || "Mock"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(attempt.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
                         <Badge variant="secondary" className="rounded-full">
-                          Lever {i + 1}
+                          {attempt.estimatedScore ?? "—"}
                         </Badge>
                       </div>
-
-
-                      <div className="grid md:grid-cols-2 gap-3">
-                        <div className="rounded-lg border p-3">
-                          <div className="text-xs text-muted-foreground mb-1">
-                            DO
-                          </div>
-                          <ul className="list-disc pl-5 text-sm space-y-1">
-                            {(lv.do || []).map((t: string, k: number) => (
-                              <li key={k}>{t}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div className="rounded-lg border p-3">
-                          <div className="text-xs text-muted-foreground mb-1">
-                            STOP
-                          </div>
-                          <ul className="list-disc pl-5 text-sm space-y-1">
-                            {(lv.stop || []).map((t: string, k: number) => (
-                              <li key={k}>{t}</li>
-                            ))}
-                          </ul>
-                        </div>
+                    ))}
+                    <div className="mt-3 rounded-xl border bg-slate-50 p-3 text-xs text-muted-foreground">
+                      <div className="flex items-center justify-between">
+                        <span>Last delta</span>
+                        <span className="font-medium text-slate-900">
+                          {learningState?.lastDeltaScorePct != null
+                            ? `${learningState.lastDeltaScorePct >= 0 ? "+" : ""}${learningState.lastDeltaScorePct} pts`
+                            : "—"}
+                        </span>
                       </div>
-
-                      <div className="text-sm text-muted-foreground">
-                        <span className="font-medium text-slate-900">Why:</span>{" "}
-                        {lv.why}
-                      </div>
-                      <div className="text-sm">
-                        <span className="font-medium">Metric:</span>{" "}
-                        <span className="text-muted-foreground">{lv.metric}</span>
-                      </div>
-                      <div className="text-sm">
-                        <span className="font-medium">Next mock rule:</span>{" "}
-                        <span className="text-muted-foreground">
-                          {lv.next_mock_rule}
+                      <div className="flex items-center justify-between">
+                        <span>Rolling average</span>
+                        <span className="font-medium text-slate-900">
+                          {learningState?.rollingScorePct != null
+                            ? `${learningState.rollingScorePct}%`
+                            : "—"}
                         </span>
                       </div>
                     </div>
-                  ))}
-                </div>
-
-                {Array.isArray(strategyPlan?.if_then_rules) &&
-                strategyPlan.if_then_rules.length ? (
-                  <div className="rounded-xl border bg-white p-4 space-y-2">
-                    <div className="font-semibold">If–Then Rules</div>
-                    <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                      {strategyPlan.if_then_rules
-                        .slice(0, 10)
-                        .map((x: string, i: number) => (
-                          <li key={i}>{x}</li>
-                        ))}
-                    </ul>
                   </div>
-                ) : null}
-
-                {Array.isArray(strategyPlan?.next_questions) &&
-                strategyPlan.next_questions.length ? (
-                  <div className="rounded-xl border bg-white p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold">Boost this plan</div>
-                        <div className="text-sm text-muted-foreground">
-                          Answer these to raise strategy confidence (we’ll wire auto re-run next).
-                        </div>
-                      </div>
-                      <Badge variant="secondary" className="rounded-full">
-                        {strategyPlan.next_questions.length} questions
-                      </Badge>
-                    </div>
-
-                    <div className="space-y-3">
-                      {strategyPlan.next_questions.map((q: any) => (
-                        <div key={q.id} className="space-y-1">
-                          <div className="text-sm font-medium">{q.question}</div>
-                          {Array.isArray(q.options) && q.options.length ? (
-                            <div className="flex flex-wrap gap-2">
-                              {q.options.map((opt: string) => (
-                                <Button
-                                  key={opt}
-                                  type="button"
-                                  variant={
-                                    boostAnswers[q.id] === opt
-                                      ? "default"
-                                      : "secondary"
-                                  }
-                                  onClick={() =>
-                                    setBoostAnswers((p) => ({ ...p, [q.id]: opt }))
-                                  }
-                                  className="rounded-full"
-                                >
-                                  {opt}
-                                </Button>
-                              ))}
-                            </div>
-                          ) : (
-                            <Input
-                              value={boostAnswers[q.id] || ""}
-                              onChange={(e) =>
-                                setBoostAnswers((p) => ({
-                                  ...p,
-                                  [q.id]: e.target.value,
-                                }))
-                              }
-                              placeholder="Type answer…"
-                            />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="text-xs text-muted-foreground">
-                      Next: we’ll add a backend endpoint so these answers can re-run strategy for this attempt.
-                    </div>
-                  </div>
-                ) : null}
-              </Card>
-            ) : (
-              <Card className="p-5 rounded-2xl space-y-2">
-                <div className="text-lg font-semibold">🚀 Strategy Playbook</div>
-                <div className="text-sm text-muted-foreground">
-                  Strategy plan is not available for this attempt yet.
-                </div>
-                {r?.meta?.strategy_plan_error ? (
-                  <div className="text-xs text-muted-foreground">
-                    Error: {String(r.meta.strategy_plan_error).slice(0, 220)}
-                  </div>
-                ) : null}
-              </Card>
-            )}
-
-            <div className="grid gap-4 md:grid-cols-1">
-              {/* Confidence */}
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-lg font-semibold">🎯 Next Mock Confidence</div>
-                    <div className="text-sm text-muted-foreground">
-                      This rises when you complete probes + log results.
-                    </div>
-                  </div>
-                  <Badge variant="secondary" className="rounded-full">
-                    {confidenceLabel}
-                  </Badge>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="text-3xl font-bold">{confidenceScore}</div>
-                  <Badge variant="secondary" className="rounded-full">
-                    {doneCount}/{probes.length} probes done
-                  </Badge>
-                </div>
-                <Progress value={confidenceScore} />
-                <div className="text-xs text-muted-foreground">
-                  Rule: no probes done → score stays low. Completion + accuracy drives it up.
-                </div>
+                ) : (
+                  <EmptyState
+                    title="No history yet"
+                    description="Run another mock to track your score trends over time."
+                    icon={<History className="h-5 w-5" />}
+                    actionLabel="Analyze a mock"
+                    onAction={() => router.push("/")}
+                  />
+                )}
               </Card>
             </div>
+          </div>
 
-            {/* Planner */}
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">🗓️ Lock your next mock</div>
-                  <div className="text-sm text-muted-foreground">
-                    Tune the plan length + intensity. We’ll scale the daily tasks.
-                  </div>
-                </div>
-                <Badge variant="secondary" className="rounded-full">
-                  {minutesPerDay} min/day
-                </Badge>
+          <div className="space-y-4 lg:sticky lg:top-6">
+            <ActionChecklist
+              items={actionChecklistItems}
+              completedIds={doneMap}
+              completedToday={Math.min(completedToday, 3)}
+              streakCount={streakCount}
+              onToggle={(id, nextDone) => {
+                const probe = probeMap[id];
+                if (probe) {
+                  toggleProbeDone(probe, nextDone);
+                }
+              }}
+              onStart={() => {
+                toast.message("Action started. You’ve got this.");
+              }}
+            />
+            <Card className="rounded-2xl border bg-white p-4 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <Sparkles className="h-4 w-4" />
+                Keep the streak alive
               </div>
-
-              <div className="grid md:grid-cols-2 gap-3">
-                <div className="rounded-xl border bg-white p-4 space-y-2">
-                  <div className="text-sm font-medium">Next mock in</div>
-                  <div className="flex flex-wrap gap-2">
-                    {[2, 4, 7, 14].map((d) => (
-                      <Button
-                        key={d}
-                        type="button"
-                        variant={nextMockInDays === d ? "default" : "secondary"}
-                        className="rounded-full"
-                        onClick={() => savePlanner({ nextMockInDays: d })}
-                      >
-                        {d} days
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border bg-white p-4 space-y-2">
-                  <div className="text-sm font-medium">Minutes per day</div>
-                  <div className="flex flex-wrap gap-2">
-                    {[20, 40, 60, 90].map((m) => (
-                      <Button
-                        key={m}
-                        type="button"
-                        variant={minutesPerDay === m ? "default" : "secondary"}
-                        className="rounded-full"
-                        onClick={() => savePlanner({ minutesPerDay: m })}
-                      >
-                        {m}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              <p className="mt-2">
+                Check off even one action a day to keep your momentum score climbing.
+              </p>
             </Card>
-
-            {/* Ranked actions */}
-            <Card className="p-5 rounded-2xl space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">🎯 Ranked Moves</div>
-                  <div className="text-sm text-muted-foreground">
-                    Three actions ranked by impact and recent signals.
-                  </div>
-                </div>
-                {nextActionsLoading ? (
-                  <Badge variant="secondary" className="rounded-full">
-                    Loading
-                  </Badge>
-                ) : null}
-              </div>
-
-              {nextActions.length === 0 && !nextActionsLoading ? (
-                <div className="text-sm text-muted-foreground">
-                  No ranked moves yet. Run another mock to unlock personalized guidance.
-                </div>
-              ) : null}
-
-              <div className="grid gap-3 md:grid-cols-3">
-                {nextActions.map((action) => (
-                  <Card key={action.id} className="p-4 space-y-3 border-dashed">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{action.title}</div>
-                      <Badge
-                        variant={action.expectedImpact === "High" ? "default" : "secondary"}
-                        className="rounded-full"
-                      >
-                        {action.expectedImpact} impact
-                      </Badge>
-                    </div>
-
-                    <div className="text-xs text-muted-foreground">
-                      Effort: {action.effort}
-                    </div>
-
-                    {action.metric ? (
-                      <div className="text-xs text-muted-foreground">
-                        Metric: {action.metric}
-                      </div>
-                    ) : null}
-
-                    {action.evidence?.length ? (
-                      <div className="text-xs text-muted-foreground">
-                        Why this now: {action.evidence.slice(0, 2).join(", ")}.
-                      </div>
-                    ) : null}
-
-                    {action.steps?.length ? (
-                      <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                        {action.steps.slice(0, 3).map((step, idx) => (
-                          <li key={idx}>{step}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-
-                    {action.evidence?.length ? (
-                      <div className="flex flex-wrap gap-2">
-                        {action.evidence.map((tag, idx) => (
-                          <Badge key={idx} variant="outline" className="rounded-full">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </Card>
-                ))}
-              </div>
-            </Card>
-
-  {/* ACTIONS: detail accordion */}
-<Accordion type="single" collapsible className="w-full">
-  <AccordionItem value="action-details">
-    <AccordionTrigger>Show detail</AccordionTrigger>
-
-    <AccordionContent className="space-y-4">
-      {/* Probes */}
-      <Card className="p-5 rounded-2xl space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-lg font-semibold">🧪 Probe Pack</div>
-            <div className="text-sm text-muted-foreground">
-              Complete these mini drills to raise confidence and improve next mock execution.
-            </div>
           </div>
-          <Badge variant="secondary" className="rounded-full">
-            {doneCount}/{probes.length} done
-          </Badge>
-        </div>
-
-        <Accordion type="single" collapsible className="w-full">
-          {probes.map((p) => {
-            const done = !!doneMap[p.id];
-            const metrics = probeMetrics[p.id] || {};
-
-            return (
-              <AccordionItem key={p.id} value={p.id}>
-                <AccordionTrigger>
-                  <div className="flex items-center gap-2">
-                    <span>{p.title}</span>
-                    <Badge
-                      variant={done ? "secondary" : "outline"}
-                      className="rounded-full"
-                    >
-                      {done ? "Done" : `${p.minutes} min`}
-                    </Badge>
-                  </div>
-                </AccordionTrigger>
-
-                <AccordionContent>
-                  <div className="space-y-3">
-                    <div className="text-sm text-muted-foreground">
-                      Target accuracy:{" "}
-                      <span className="font-medium text-slate-900">
-                        {p.targetAccuracy}%
-                      </span>
-                    </div>
-
-                    <div className="text-sm text-muted-foreground">
-                      Why this matters: {p.why}
-                    </div>
-
-                    <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                      {p.instructions.map((t, i) => (
-                        <li key={i}>{t}</li>
-                      ))}
-                    </ul>
-
-                    <div className="grid md:grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <div className="text-xs text-muted-foreground">
-                          Accuracy (%)
-                        </div>
-                        <Input
-                          inputMode="numeric"
-                          value={metrics.accuracy ?? ""}
-                          onChange={(e) =>
-                            setProbeMetric(p.id, {
-                              accuracy: e.target.value
-                                ? Number(e.target.value)
-                                : undefined,
-                            })
-                          }
-                          placeholder="e.g., 70"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="text-xs text-muted-foreground">
-                          Time (min)
-                        </div>
-                        <Input
-                          inputMode="numeric"
-                          value={metrics.time_min ?? ""}
-                          onChange={(e) =>
-                            setProbeMetric(p.id, {
-                              time_min: e.target.value
-                                ? Number(e.target.value)
-                                : undefined,
-                            })
-                          }
-                          placeholder="e.g., 15"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="text-xs text-muted-foreground">
-                          Self confidence (1–5)
-                        </div>
-                        <Input
-                          inputMode="numeric"
-                          value={metrics.self_confidence ?? ""}
-                          onChange={(e) =>
-                            setProbeMetric(p.id, {
-                              self_confidence: e.target.value
-                                ? Number(e.target.value)
-                                : undefined,
-                            })
-                          }
-                          placeholder="e.g., 4"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant={done ? "secondary" : "default"}
-                        onClick={() => toggleProbeDone(p, !done)}
-                      >
-                        {done ? "Mark as not done" : "Mark as done"}
-                      </Button>
-                    </div>
-
-                    <div className="text-xs text-muted-foreground">
-                      Tip: enter metrics to increase confidence score faster.
-                    </div>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            );
-          })}
-        </Accordion>
-      </Card>
-
-      {/* Timing coach */}
-      <Card className="p-5 rounded-2xl space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-lg font-semibold">⏱️ Adaptive timing coach</div>
-            <div className="text-sm text-muted-foreground">
-              Log per-section time (manual/OCR) to generate pacing rules + order guidance.
-            </div>
-          </div>
-          <Badge variant="secondary" className="rounded-full">
-            {sectionTimings.length || 0}/{sectionSchema.length} sections
-          </Badge>
-        </div>
-
-        {sectionSchema.length ? (
-          <div className="grid gap-3">
-            {sectionSchema.map((section) => {
-              const entry = sectionTimings.find((t) => t.section === section.label);
-              const targetMinutes = examKey ? SECTION_TIME_TARGETS[examKey]?.[section.label] : null;
-              return (
-                <div key={section.label} className="rounded-xl border bg-white p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">{section.label}</div>
-                    <div className="text-xs text-muted-foreground">
-                      Target: {targetMinutes ?? "--"} min
-                    </div>
-                  </div>
-                  <div className="mt-2 grid gap-2 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">Time spent (min)</div>
-                      <Input
-                        inputMode="numeric"
-                        value={entry?.minutes ?? ""}
-                        onChange={(e) =>
-                          setSectionTiming(section.label, {
-                            minutes: e.target.value ? Number(e.target.value) : null,
-                          })
-                        }
-                        placeholder="e.g., 38"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">Section order</div>
-                      <Input
-                        inputMode="numeric"
-                        value={entry?.order ?? ""}
-                        onChange={(e) =>
-                          setSectionTiming(section.label, {
-                            order: e.target.value ? Number(e.target.value) : null,
-                          })
-                        }
-                        placeholder="1, 2, 3..."
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="text-sm text-muted-foreground">
-            Section schema not available yet. Analyze a mock to unlock timing coach.
-          </div>
-        )}
-
-        {timingRules.length ? (
-          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-            {timingRules.map((rule, idx) => (
-              <li key={idx}>{rule}</li>
-            ))}
-          </ul>
-        ) : null}
-      </Card>
-
-      {/* Curated practice sets */}
-      <Card className="p-5 rounded-2xl space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-lg font-semibold">📌 Curated practice sets</div>
-            <div className="text-sm text-muted-foreground">
-              Weakness → practice pack mapping with outcomes tracked for better strategy ranking.
-            </div>
-          </div>
-          <Badge variant="secondary" className="rounded-full">
-            {practiceSets.length} sets
-          </Badge>
-        </div>
-
-        <div className="grid gap-3">
-          {practiceSets.map((set) => {
-            const metrics = practiceMetrics[set.id] || {};
-            return (
-              <div key={set.id} className="rounded-xl border bg-white p-4 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="font-medium">{set.title}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {set.section} • {set.level} • {set.questions} Q • {set.minutes} min
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="rounded-full">
-                    {set.tags.join(", ")}
-                  </Badge>
-                </div>
-                <div className="text-sm text-muted-foreground">{set.description}</div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">Accuracy (%)</div>
-                    <Input
-                      inputMode="numeric"
-                      value={metrics.accuracy ?? ""}
-                      onChange={(e) =>
-                        setPracticeMetric(set.id, {
-                          accuracy: e.target.value ? Number(e.target.value) : undefined,
-                        })
-                      }
-                      placeholder="e.g., 78"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">Time (min)</div>
-                    <Input
-                      inputMode="numeric"
-                      value={metrics.time_min ?? ""}
-                      onChange={(e) =>
-                        setPracticeMetric(set.id, {
-                          time_min: e.target.value ? Number(e.target.value) : undefined,
-                        })
-                      }
-                      placeholder="e.g., 18"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">Score (optional)</div>
-                    <Input
-                      inputMode="numeric"
-                      value={metrics.score ?? ""}
-                      onChange={(e) =>
-                        setPracticeMetric(set.id, {
-                          score: e.target.value ? Number(e.target.value) : undefined,
-                        })
-                      }
-                      placeholder="e.g., 9"
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      {/* Study plan */}
-      <Card className="p-5 rounded-2xl space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-lg font-semibold">🗺️ Weekly Plan</div>
-            <div className="text-sm text-muted-foreground">
-              A weekly view first; daily details only when you need them.
-            </div>
-          </div>
-          <Badge variant="secondary" className="rounded-full">
-            {plannedDays} days
-          </Badge>
-        </div>
-
-        {weeklyPlan.length ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            {weeklyPlan.map((week) => (
-              <div key={week.week} className="rounded-xl border bg-white p-4">
-                <div className="font-medium">Week {week.week}</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  Days {week.days[0]}–{week.days[week.days.length - 1]} •{" "}
-                  {week.totalMinutes} min • {week.taskCount} tasks
-                </div>
-                {week.focus.length ? (
-                  <div className="text-xs text-muted-foreground mt-2">
-                    Focus: {week.focus.slice(0, 3).join(", ")}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-sm text-muted-foreground">
-            No plan generated yet. Re-run analysis after backend update.
-          </div>
-        )}
-
-        {adjustedPlan.length ? (
-          <Accordion type="single" collapsible className="w-full">
-            <AccordionItem value="daily-plan">
-              <AccordionTrigger>Show daily detail</AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-2">
-                  {adjustedPlan.map((d: any) => (
-                    <div key={d.day} className="rounded-lg border bg-white p-3">
-                      <div className="text-sm font-medium">
-                        Day {d.day} • {d.focus} • {d.time_minutes} min
-                      </div>
-                      <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1 mt-2">
-                        {(d.tasks || []).map((t: string, i: number) => (
-                          <li key={i}>{t}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-        ) : null}
-      </Card>
-    </AccordionContent>
-  </AccordionItem>
-</Accordion>
-
-{/* ✅ CLOSE ACTIONS TAB */}
-</TabsContent>
-
-{/* ✅ EVIDENCE TAB (only once) */}
-<TabsContent value="evidence" className="space-y-4">
-  <div className="grid gap-4 md:grid-cols-2">
-    <Card className="p-5 rounded-2xl space-y-3">
-      <div className="text-lg font-semibold">Outcome deltas (last 3 mocks)</div>
-      {outcomeDeltas.hasEnough ? (
-        <div className="grid gap-3 text-sm text-muted-foreground">
-          <div className="flex items-center justify-between">
-            <span>Score trend</span>
-            <span className="font-medium text-slate-900">
-              {outcomeDeltas.scoreDelta != null
-                ? `${outcomeDeltas.scoreDelta >= 0 ? "+" : ""}${outcomeDeltas.scoreDelta}`
-                : "—"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span>Accuracy control</span>
-            <span className="font-medium text-slate-900">
-              {outcomeDeltas.accuracyDelta != null
-                ? `${outcomeDeltas.accuracyDelta >= 0 ? "+" : ""}${outcomeDeltas.accuracyDelta}`
-                : "—"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span>Speed stability</span>
-            <span className="font-medium text-slate-900">
-              {outcomeDeltas.speedDelta != null
-                ? `${outcomeDeltas.speedDelta >= 0 ? "+" : ""}${outcomeDeltas.speedDelta}`
-                : "—"}
-            </span>
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Compared against the previous 3 mocks.
-          </div>
-        </div>
-      ) : (
-        <div className="text-sm text-muted-foreground">
-          Log at least 6 mocks to unlock outcome deltas.
-        </div>
-      )}
-    </Card>
-
-    <Card className="p-5 rounded-2xl space-y-3">
-      <div className="text-lg font-semibold">Error taxonomy (faculty lens)</div>
-      <div className="space-y-2 text-sm text-muted-foreground">
-        {errorTaxonomy.map((item) => (
-          <div key={item.key} className="rounded-xl border bg-white p-3">
-            <div className="flex items-center justify-between">
-              <div className="font-medium text-slate-900">{item.label}</div>
-              <Badge variant="secondary" className="rounded-full">
-                {item.value}%
-              </Badge>
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {item.detail}
-            </div>
-            <div className="mt-2">
-              <Progress value={item.value} />
-            </div>
-          </div>
-        ))}
+        </section>
       </div>
-    </Card>
-  </div>
-</TabsContent>
-</Tabs>
-
-</div>
-</div>
-</main>
-);
+    </main>
+  );
 }

@@ -152,6 +152,9 @@ export const sampleNextActions = [
     expectedImpact: "High",
     effort: "20 min",
     evidence: ["Time spikes in DILR", "Late-section panic signal"],
+    why: "Hard stops prevent time leaks and protect easy marks.",
+    duration: "20 min",
+    difficulty: "Medium",
   },
   {
     id: "qa-easy-first",
@@ -161,6 +164,9 @@ export const sampleNextActions = [
     expectedImpact: "Medium",
     effort: "25 min",
     evidence: ["Missed easy wins", "Accuracy dip in final 20%"],
+    why: "Easy wins build momentum and stabilize accuracy.",
+    duration: "25 min",
+    difficulty: "Medium",
   },
   {
     id: "review-errors",
@@ -170,6 +176,9 @@ export const sampleNextActions = [
     expectedImpact: "Medium",
     effort: "15 min",
     evidence: ["Careless errors at 22%"],
+    why: "Same-day review converts mistakes into rules quickly.",
+    duration: "15 min",
+    difficulty: "Easy",
   },
 ];
 
