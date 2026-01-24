@@ -1,75 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cogniverse Mock Analyzer
 
-## Getting Started
+Cogniverse Mock Analyzer is a Next.js app that turns mock scorecards into deterministic next-best actions, a 7-day plan, and a checklist you can track over time.
 
-First, run the development server:
+## Quick start
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Configuration
-
-Create a `.env.local` file with the following values:
+Create a `.env.local` file:
 
 ```bash
-# Required
+# MongoDB
 MONGODB_URI="mongodb://localhost:27017"
-
-# Optional (defaults to "cogniverse")
 MONGODB_DB="cogniverse"
 
-# Optional: use the Python analyzer
-ANALYZER_BACKEND="python"
-PY_ANALYZER_URL="http://127.0.0.1:8000"
+# NextAuth (Google)
+NEXTAUTH_SECRET="your-secret"
+NEXTAUTH_URL="http://localhost:3000"
+GOOGLE_CLIENT_ID="your-google-client-id"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
+
+# Optional: OpenAI (used for OCR if enabled)
+OPENAI_API_KEY=""
 ```
 
-The app uses an httpOnly cookie for anonymous sessions, so the API no longer requires a client-supplied `userId`.
+## Core flows
 
-If you set `ANALYZER_BACKEND="python"`, ensure the Python service is running at `PY_ANALYZER_URL`.
+- **Upload → Analyze → Actions/Plan → Checklist/Notes → History**
+- Deterministic signal aggregation (no embeddings or ML) for next-best actions and plan generation.
 
-## Code Map (for architecture work)
+## Architecture
 
-For a system-level view of the services, data flows, and storage model, see [`CODEMAP.md`](./CODEMAP.md).
+```mermaid
+flowchart TD
+  User((User)) -->|Sign in| NextAuth[NextAuth Google]
+  User -->|Upload PDF/Image/Text| UploadUI[UploadCard]
+  UploadUI --> UploadAPI[/api/upload]
+  UploadAPI --> MongoUploads[(uploads)]
+  UploadAPI --> Extract[PDF/OCR Extraction]
 
-## Product roadmap ideas
+  UploadUI --> AnalyzeAPI[/api/analyze]
+  AnalyzeAPI --> MongoAttempts[(attempts)]
+  AnalyzeAPI --> MongoAnalyses[(analyses)]
+  AnalyzeAPI --> Signals[Signals Aggregator]
 
-The following feature ideas are prioritized for impact and data leverage:
+  User --> Dashboard[/app Dashboard]
+  Dashboard --> ActionsAPI[/api/actions/mark-done]
+  Dashboard --> NotesAPI[/api/notes]
+  Dashboard --> EventsAPI[/api/events]
+  Dashboard --> NudgesAPI[/api/nudges]
 
-1. **User accounts + data portability**: allow login (email/OTP) so users keep history across devices; add export to CSV/JSON for coaching use.
-2. **Exam-specific schema enforcement**: tighten input normalization (CAT/NEET/JEE) with per-exam section schema, enabling richer analytics and fewer assumptions.
-3. **Personalized drill recommendations**: map weaknesses → curated practice sets; track outcomes to refine strategy recommendations.
-4. **Adaptive timing coach**: collect per-section timing data (manual or OCR) to generate pacing rules and section order guidance.
-5. **Cohort insights dashboard**: aggregate anonymized trends to show percentile benchmarks, common mistakes, and progress velocity.
-6. **Scheduled nudge + plan adherence**: reminders for daily plan tasks, streaks, and mock prep countdown to reduce drop-off.
+  ActionsAPI --> MongoActions[(actions)]
+  NotesAPI --> MongoNotes[(notes)]
+  EventsAPI --> MongoEvents[(events)]
 
-## Learning behavior engine plan
+  User --> History[/history]
+  History --> HistoryAPI[/api/history]
+  HistoryAPI --> MongoAttempts
+  HistoryAPI --> MongoAnalyses
+  HistoryAPI --> MongoUploads
 
-For a concrete plan to improve accuracy and build a per-user learning behavior engine with next-best-action recommendations, see [`docs/learning-engine.md`](./docs/learning-engine.md).
+  User --> Account[/account]
+  Account --> UserAPI[/api/user]
+  Account --> ExportAPI[/api/account/export]
+  Account --> DeleteAPI[/api/account/delete]
+  UserAPI --> MongoUsers[(users)]
+  ExportAPI --> MongoUsers
+  DeleteAPI --> MongoUsers
+```
 
-## Learn More
+For a diagram source file, see [`docs/architecture.mmd`](./docs/architecture.mmd).
 
-To learn more about Next.js, take a look at the following resources:
+## Code map
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [`CODEMAP.md`](./CODEMAP.md) for the detailed structure and data model.

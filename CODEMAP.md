@@ -1,81 +1,69 @@
-# Code Map (Cogniverse)
+# Code Map (Cogniverse Mock Analyzer)
 
 ## Purpose
-This document provides a system-level map of the codebase so a data architect can design and evolve the platform architecture.
+A system-level map of the codebase: UI surfaces, API routes, data flows, and storage model.
 
 ## High-level architecture
-- **Next.js App Router UI** (React/TypeScript) renders the landing flow, dashboards, reports, and history pages. It also calls API routes under `app/api/*` for analysis and data access.
-- **Node.js API routes** run inside Next.js (`app/api/.../route.ts`). These endpoints orchestrate data validation, storage, and analysis calls (OpenAI directly or via the Python service).
-- **MongoDB** stores anonymous user profiles, mock attempts, strategy memory snapshots, and progress/probe data.
-- **Optional Python analyzer service** (`python_service/main.py`) provides report generation and aggregated insights. The Next.js API can switch to this backend via environment configuration.
+- **Next.js App Router UI** in `app/` renders landing, dashboard, account, and history.
+- **Next.js API routes** in `app/api/*/route.ts` provide uploads, analysis, checklist updates, notes, history, and bots.
+- **MongoDB** stores user profiles, uploads, attempts, analyses, actions, notes, and events.
+- **Deterministic rules engine** in `lib/engine/*` builds next-best actions and 7-day plans.
 
 ## Main runtime flows
-### 1) Mock analysis pipeline
-1. **UI intake + file upload**: `app/landing/page.tsx` collects exam, goal, struggles, and a PDF/text payload, then POSTs to `/api/analyze`.
-2. **API intake validation + text extraction**: `/api/analyze` validates the intake schema, extracts PDF text, and detects the exam if needed.
-3. **Analysis execution**:
-   - **Node/OpenAI**: `lib/analyzer.ts` builds prompts and calls OpenAI models to generate the report + strategy plan.
-   - **Python** (optional): `lib/pythonClient.ts` (invoked by `/api/analyze`) forwards analysis to the Python service when `ANALYZER_BACKEND="python"`.
-4. **Persistence**: `/api/analyze` stores the raw text, intake, and generated report in `mock_attempts`, and stores a strategy snapshot in `strategy_memory`.
-5. **UI navigation**: client routes to `/report/[id]`, which loads from `/api/report/[id]`.
+### 1) Upload → Analyze
+1. **Upload**: `components/upload/UploadCard.tsx` posts to `/api/upload`.
+2. **Extraction**: `/api/upload` parses PDF text or image OCR (OpenAI if configured) and stores metadata in `uploads`.
+3. **Analyze**: `/api/analyze` creates an `attempt`, runs deterministic signals aggregation, and stores an `analysis` with NBA + plan.
 
-### 2) History + report retrieval
-- **History list**: `/api/history` returns recent `mock_attempts` metadata for the current anonymous user session.
-- **Report detail**: `/api/report/[id]` loads a single attempt (report payload + metadata).
+### 2) Checklist + Notes
+- **Checklist**: `components/analysis/Checklist.tsx` calls `/api/actions/mark-done` to store completion per action.
+- **Notes**: `components/analysis/NotesPanel.tsx` calls `/api/notes` to store reflections.
 
-### 3) Insights (aggregated analysis)
-- **API orchestration**: `/api/insights` loads the last N attempts, then calls the Python service `/insights` endpoint to build aggregated trends.
+### 3) History
+- `/api/history` aggregates attempts + analyses + uploads, returning cards for `/history`.
 
-### 4) Progress + probes (study planning)
-- **Progress state**: `/api/progress` reads/writes `user_progress` for probe completion, confidence, and planning settings.
-- **User profile**: `/api/user` reads/writes `users` for display name, default exam, and coach settings.
+### 4) Account + Onboarding
+- `/api/user` reads/writes the user profile document.
+- `/api/account/export` returns a JSON export.
+- `/api/account/delete` soft deletes the account (sets `deletedAt`).
 
-### 5) Learning state (early personalization)
-- **Learning state**: `/api/learning-state` reads `user_learning_state` derived from recent mocks.
-- **Next-best actions**: `/api/next-actions` ranks recommendations using strategy plans + learning state.
-
+### 5) Events + Nudges + Bots
+- `/api/events` logs product events into `events`.
+- `/api/nudges` computes deterministic nudges from event history.
+- `/api/bot/*` provides feature-helper and EI bots.
 
 ## Directory map
 ### `app/`
-- **`app/landing/page.tsx`**: main onboarding intake and analysis trigger.
-- **`app/report/[id]/page.tsx`**: report display.
-- **`app/history/page.tsx`**: history list.
-- **`app/dashboard`**: user dashboards and progress views.
-- **`app/api/*/route.ts`**: server-side API endpoints (analysis, history, insights, progress, user, session).
+- `app/page.tsx`: public landing page.
+- `app/app/page.tsx`: authenticated dashboard.
+- `app/account/page.tsx`: account settings.
+- `app/history/page.tsx`: history list.
+- `app/api/*/route.ts`: server APIs.
+
+### `components/`
+- `components/upload/UploadCard.tsx`: multi-input upload UI.
+- `components/analysis/*`: NBA list, plan, checklist, and notes.
+- `components/bot/BotWidget.tsx`: helper + EI bot UI.
+- `components/share/ShareCard.tsx`: shareable summary UI.
 
 ### `lib/`
-- **`lib/analyzer.ts`**: OpenAI-powered report + strategy plan generation.
-- **`lib/pythonClient.ts`**: API client for the Python analyzer backend.
-- **`lib/extractText.ts`**: PDF text extraction.
-- **`lib/persist.ts`**: MongoDB persistence (users, mock_attempts, strategy_memory, user_progress).
-- **`lib/session.ts`**: anonymous session cookie management.
-- **`lib/schema.ts`, `lib/types.ts`**: report schemas and shared types.
-
-### `python_service/`
-- **`python_service/main.py`**: FastAPI service for report generation and insights aggregation.
+- `lib/auth.ts`: NextAuth config.
+- `lib/mongodb.ts`: Mongo client and `getDb()`.
+- `lib/db.ts`: collection names + indexes.
+- `lib/engine/signals.ts`: deterministic NBA + plan builder.
+- `lib/engine/nudges.ts`: nudge rules.
+- `lib/schemas/*`: shared Zod schemas.
 
 ## Data model (MongoDB)
-> Collection names and fields are inferred from the persistence layer. Confirm indexes + TTL requirements during architecture design.
-
-- **`users`** (anonymous user profile)
-  - `_id` (string userId), `displayName`, `examDefault`, `coach`, `createdAt`, `lastSeenAt`, `updatedAt`.
-- **`mock_attempts`** (per mock analysis)
-  - `userId`, `exam`, `intake`, `rawText`, `report`, `createdAt`.
-- **`strategy_memory`** (strategy snapshots)
-  - `userId`, `exam`, `attemptId`, `lever_titles`, `if_then_rules`, `confidence_score`, `confidence_band`, `_is_fallback`, `createdAt`.
-- **`user_progress`** (study plan + probe tracking)
-  - `userId`, `exam`, `nextMockInDays`, `minutesPerDay`, `probes`, `confidence`, `createdAt`, `updatedAt`.
-- **`user_learning_state`** (derived per-user signals)
-  - `userId`, `exam`, `attemptCount`, `lastScorePct`, `rollingScorePct`, `lastDeltaScorePct`, `rollingDeltaScorePct`, `weakTopics`, `strategyConfidenceBand`, `createdAt`, `updatedAt`.
+- **users**: `userId`, `email`, `displayName`, `examGoal`, `weeklyHours`, `preferences`, `onboardingCompleted`, `deletedAt`.
+- **uploads**: `userId`, `type`, `filename`, `mimeType`, `size`, `extractedText`, `storageRef`.
+- **attempts**: `userId`, `uploadId`, `exam`, `rawTextHash`.
+- **analyses**: `userId`, `attemptId`, `summary`, `nba`, `plan`, `signalsUsed`.
+- **actions**: `userId`, `analysisId`, `actionId`, `done`, `completedAt`.
+- **notes**: `userId`, `analysisId`, `actionId`, `content`.
+- **events**: `userId`, `eventName`, `payload`, `timestamp`.
 
 ## External dependencies
-- **OpenAI**: used by `lib/analyzer.ts` (Node) and `python_service/main.py` (Python). Requires `OPENAI_API_KEY`.
-- **MongoDB**: required for persistence (`MONGODB_URI`, `MONGODB_DB`).
-
-## Configuration entry points
-- **`.env.local`** (documented in README): `MONGODB_URI`, `MONGODB_DB`, `OPENAI_API_KEY`, `ANALYZER_BACKEND`, `PY_ANALYZER_URL`.
-
-## Observability + scaling considerations (for architecture work)
-- Add request tracing across `/api/analyze` and Python service calls.
-- Consider background job queues for expensive PDF parsing or analysis workloads.
-- Add MongoDB indexes for `mock_attempts.userId`, `mock_attempts.createdAt`, `strategy_memory.userId`, `user_progress.userId`.
+- **MongoDB**: `MONGODB_URI`, `MONGODB_DB`.
+- **Google OAuth**: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`.
+- **OpenAI** (optional OCR): `OPENAI_API_KEY`.

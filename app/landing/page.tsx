@@ -478,7 +478,7 @@ export default function LandingPage() {
                 <Link href="/institute">Institute</Link>
               </Button>
               <Button variant="ghost" asChild>
-                <Link href="/pricing">Pricing</Link>
+                <Link href="/account">Account</Link>
               </Button>
               <Button variant="ghost" asChild>
                 <Link href="/trust">Trust</Link>

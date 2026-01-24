@@ -34,7 +34,7 @@ export default function DashboardPage() {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-8 px-4 pb-16 pt-14 sm:px-6">
         <EmptyState
-          title="Upload one mock to unlock your plan."
+          title="Upload one mock to generate your plan."
           description="We will pinpoint the bottleneck, show the expected uplift, and give you the fastest next steps."
           ctaLabel="Upload mock"
           ctaHref="/"
@@ -202,7 +202,7 @@ function TodayExecutionCard({
             <Lock className="h-4 w-4 text-primary" aria-hidden />
             Progress tracking is locked
           </div>
-          <p className="max-w-xs text-xs text-muted-foreground">Marking tasks done unlocks after you upgrade.</p>
+          <p className="max-w-xs text-xs text-muted-foreground">Mark tasks done to track progress.</p>
           <Button size="sm" className="tap-scale rounded-full">{state.report.paywall.ctaLabel}</Button>
         </div>
       ) : null}

@@ -1,0 +1,31 @@
+{
+  "features": [
+    {
+      "keywords": ["upload", "pdf", "image", "text"],
+      "reply": "You can upload a PDF or image scorecard, or paste text directly on the dashboard.",
+      "actions": [
+        { "label": "Go to Dashboard", "href": "/app" }
+      ]
+    },
+    {
+      "keywords": ["history", "past", "previous"],
+      "reply": "View your recent analyses and progress on the History page.",
+      "actions": [
+        { "label": "View History", "href": "/history" }
+      ]
+    },
+    {
+      "keywords": ["account", "profile", "settings"],
+      "reply": "Update your profile, export data, or delete your account from the Account page.",
+      "actions": [
+        { "label": "Account Settings", "href": "/account" }
+      ]
+    }
+  ],
+  "fallback": {
+    "reply": "I can help with uploads, analyses, history, and account settings. Try asking about one of those.",
+    "actions": [
+      { "label": "Dashboard", "href": "/app" }
+    ]
+  }
+}

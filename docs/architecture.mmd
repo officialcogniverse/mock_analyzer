@@ -1,0 +1,35 @@
+flowchart TD
+  User((User)) -->|Sign in| NextAuth[NextAuth Google]
+  User -->|Upload PDF/Image/Text| UploadUI[UploadCard]
+  UploadUI --> UploadAPI[/api/upload]
+  UploadAPI --> MongoUploads[(uploads)]
+  UploadAPI --> Extract[PDF/OCR Extraction]
+
+  UploadUI --> AnalyzeAPI[/api/analyze]
+  AnalyzeAPI --> MongoAttempts[(attempts)]
+  AnalyzeAPI --> MongoAnalyses[(analyses)]
+  AnalyzeAPI --> Signals[Signals Aggregator]
+
+  User --> Dashboard[/app Dashboard]
+  Dashboard --> ActionsAPI[/api/actions/mark-done]
+  Dashboard --> NotesAPI[/api/notes]
+  Dashboard --> EventsAPI[/api/events]
+  Dashboard --> NudgesAPI[/api/nudges]
+
+  ActionsAPI --> MongoActions[(actions)]
+  NotesAPI --> MongoNotes[(notes)]
+  EventsAPI --> MongoEvents[(events)]
+
+  User --> History[/history]
+  History --> HistoryAPI[/api/history]
+  HistoryAPI --> MongoAttempts
+  HistoryAPI --> MongoAnalyses
+  HistoryAPI --> MongoUploads
+
+  User --> Account[/account]
+  Account --> UserAPI[/api/user]
+  Account --> ExportAPI[/api/account/export]
+  Account --> DeleteAPI[/api/account/delete]
+  UserAPI --> MongoUsers[(users)]
+  ExportAPI --> MongoUsers
+  DeleteAPI --> MongoUsers

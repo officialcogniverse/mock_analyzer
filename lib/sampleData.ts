@@ -45,7 +45,7 @@ export const sampleReportPayload = {
       {
         title: "Pass-1 timing cap",
         duration: "Next 2 mocks",
-        expected_impact: "Reduce time leakage and unlock easy wins.",
+        expected_impact: "Reduce time leakage and find quick wins.",
         steps: ["90s cap per question", "Mark and move on", "Return only if time remains"],
       },
       {

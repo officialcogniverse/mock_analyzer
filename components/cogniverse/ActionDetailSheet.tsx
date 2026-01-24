@@ -42,7 +42,7 @@ export function ActionDetailSheet({ action, open, onOpenChange, onShare }: Actio
   const handleDone = () => {
     toggleActionComplete(action.id);
     setCelebrate(true);
-    toast.success("Action completed. Momentum unlocked.");
+    toast.success("Action completed. Momentum secured.");
     window.setTimeout(() => setCelebrate(false), reducedMotion ? 0 : 900);
   };
 

@@ -93,7 +93,7 @@ export default function PlanPage() {
               <Sparkles className="h-4 w-4" aria-hidden />
               Unlock the full sprint
             </div>
-            <p className="text-sm text-muted-foreground">Free gives you day 1. Premium unlocks every day, all actions, and reasoning.</p>
+            <p className="text-sm text-muted-foreground">Your plan highlights daily actions and reasoning.</p>
             <Button className="tap-scale rounded-full">{report.paywall.ctaLabel}</Button>
           </section>
         </aside>

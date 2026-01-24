@@ -18,7 +18,7 @@ export function NextBestActionRail({
   actions,
   loading,
   title = "Next best action",
-  emptyMessage = "Run another mock to unlock your next best action.",
+  emptyMessage = "Run another mock to get your next best action.",
   ctaLabel,
   onCtaClick,
 }: NextBestActionRailProps) {
