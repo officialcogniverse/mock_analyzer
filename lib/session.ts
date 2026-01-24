@@ -20,7 +20,7 @@ export const SessionDataSchema = z
     role: SessionRoleSchema.default("student"),
     issuedAt: z.string().optional(),
   })
-  .strict();
+  .passthrough();
 
 export type SessionData = z.infer<typeof SessionDataSchema>;
 

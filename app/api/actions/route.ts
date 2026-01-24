@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { attachSessionCookie, ensureSession } from "@/lib/session";
 import {
-  getAttemptById,
+  getAttemptForUser,
   listActionStatesForAttempt,
   upsertActionState,
 } from "@/lib/persist";
@@ -18,7 +18,7 @@ const postSchema = z
     status: z.enum(["pending", "completed"]),
     reflection: z.string().max(2000).optional(),
   })
-  .strict();
+  .passthrough();
 
 export async function GET(req: Request) {
   const session = ensureSession(req);
@@ -36,8 +36,12 @@ export async function GET(req: Request) {
     return res;
   }
 
-  const attempt = await getAttemptById(attemptId);
-  if (!attempt || String(attempt.userId) !== session.userId) {
+  const attempt = await getAttemptForUser({
+    attemptId,
+    userId: session.userId,
+    backfillMissingUserId: true,
+  });
+  if (!attempt) {
     const res = NextResponse.json({ error: "Attempt not found." }, { status: 404 });
     if (session.isNew) attachSessionCookie(res, session);
     return res;
@@ -75,8 +79,12 @@ export async function POST(req: Request) {
     return res;
   }
 
-  const attempt = await getAttemptById(parsed.data.attemptId);
-  if (!attempt || String(attempt.userId) !== session.userId) {
+  const attempt = await getAttemptForUser({
+    attemptId: parsed.data.attemptId,
+    userId: session.userId,
+    backfillMissingUserId: true,
+  });
+  if (!attempt) {
     const res = NextResponse.json({ error: "Attempt not found." }, { status: 404 });
     if (session.isNew) attachSessionCookie(res, session);
     return res;

@@ -232,19 +232,87 @@ export async function saveAttempt(params: {
   const db = await getDb();
   const attempts = db.collection<any>("mock_attempts");
 
+  const userId = String(params.userId || "").trim();
+  if (!userId) {
+    throw new Error("saveAttempt requires a userId.");
+  }
+
   const createdAt = new Date();
 
+  const reportMeta =
+    params.report && typeof params.report === "object" && params.report.meta
+      ? params.report.meta
+      : {};
+  const reportWithIdentity =
+    params.report && typeof params.report === "object"
+      ? {
+          ...params.report,
+          meta: {
+            ...reportMeta,
+            userId,
+          },
+        }
+      : params.report;
+
   const doc = {
-    userId: params.userId,
+    userId,
     exam: String(params.exam || "").toUpperCase(), // normalize
     intake: params.intake,
     rawText: params.rawText,
-    report: params.report,
+    report: reportWithIdentity,
     createdAt,
   };
 
   const res = await attempts.insertOne(doc);
   return res.insertedId.toString(); // return string id for frontend
+}
+
+function isMissingUserId(value: unknown) {
+  return !value || !String(value).trim();
+}
+
+export async function updateAttemptIdentity(params: {
+  attemptId: string;
+  userId: string;
+}) {
+  const db = await getDb();
+  const attempts = db.collection<any>("mock_attempts");
+
+  const attemptObjectId = new ObjectId(params.attemptId);
+  const userId = String(params.userId || "").trim();
+  if (!userId) return null;
+
+  const existing = await attempts.findOne({ _id: attemptObjectId });
+  if (!existing) return null;
+
+  const reportMeta =
+    existing.report && typeof existing.report === "object" && existing.report.meta
+      ? existing.report.meta
+      : {};
+
+  const nextReport =
+    existing.report && typeof existing.report === "object"
+      ? {
+          ...existing.report,
+          meta: {
+            ...reportMeta,
+            userId,
+            attemptId: params.attemptId,
+          },
+        }
+      : existing.report;
+
+  await attempts.updateOne(
+    { _id: attemptObjectId },
+    {
+      $set: {
+        userId,
+        report: nextReport,
+      },
+    }
+  );
+
+  return attempts.findOne({ _id: attemptObjectId });
 }
 export async function saveStrategyMemorySnapshot(params: {
   userId: string;
@@ -310,6 +378,30 @@ export async function getAttemptById(id: string) {
   const attempts = db.collection<any>("mock_attempts");
 
   return attempts.findOne({ _id: new ObjectId(id) });
+}
+
+export async function getAttemptForUser(params: {
+  attemptId: string;
+  userId: string;
+  backfillMissingUserId?: boolean;
+}) {
+  const attempt = await getAttemptById(params.attemptId);
+  if (!attempt) return null;
+
+  const userId = String(params.userId || "").trim();
+  if (!userId) return null;
+
+  if (String(attempt.userId || "") === userId) {
+    return attempt;
+  }
+
+  if (params.backfillMissingUserId && isMissingUserId(attempt.userId)) {
+    await updateAttemptIdentity({ attemptId: params.attemptId, userId });
+    const updated = await getAttemptById(params.attemptId);
+    return updated && String(updated.userId || "") === userId ? updated : null;
+  }
+
+  return null;
 }
 
 export async function getLatestAttemptForExam(params: {
