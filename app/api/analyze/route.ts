@@ -11,6 +11,7 @@ import {
   updateUserLearningStateFromReport,
   getLatestAttemptForExam,
   updateAttemptIdentity,
+  getAttemptForUser,
 } from "@/lib/persist";
 import { analyzeViaPython } from "@/lib/pythonClient";
 import { attachSessionCookie, ensureSession } from "@/lib/session";
@@ -18,6 +19,7 @@ import { extractTextFromImages } from "@/lib/extractTextFromImages";
 import { fireAndForgetEvent } from "@/lib/events";
 import { z } from "zod";
 import { normalizeReport } from "@/lib/report";
+import { buildAttemptBundle } from "@/lib/domain/mappers";
 
 const intakeSchema = z
   .object({
@@ -318,7 +320,7 @@ export async function POST(req: Request) {
       ? await analyzeViaPython({ exam: examLabel, intake, text })
       : await analyzeMock({ exam: examLabel, intake, text });
 
-    const report = normalizeReport(unwrapReport(rawOut));
+    const report = normalizeReport(unwrapReport(rawOut)) as any;
 
     const focusXP = computeFocusXP(report);
     report.meta = report.meta || {};
@@ -437,7 +439,35 @@ export async function POST(req: Request) {
       console.warn("User learning state update failed:", e?.message ?? e);
     }
 
-    const res = NextResponse.json({ id: attemptId });
+    const savedAttempt = await getAttemptForUser({
+      attemptId,
+      userId: session.userId,
+      backfillMissingUserId: true,
+    });
+
+    const bundle = savedAttempt
+      ? buildAttemptBundle(savedAttempt, session.userId)
+      : {
+          attempt: {
+            id: attemptId,
+            userId: session.userId,
+            createdAt: new Date().toISOString(),
+            sourceType: "upload" as const,
+            metrics: [],
+          },
+          report: buildAttemptBundle(
+            {
+              id: attemptId,
+              userId: session.userId,
+              createdAt: new Date(),
+              rawText: text,
+              report,
+            },
+            session.userId
+          ).report,
+        };
+
+    const res = NextResponse.json(bundle);
     if (session.isNew) attachSessionCookie(res, session);
     return res;
   } catch (e: any) {
