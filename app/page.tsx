@@ -1,348 +1,207 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import * as React from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
+import { ArrowRight, CalendarDays, Goal, UploadCloud } from "lucide-react";
+
+import { ShareCard } from "@/components/cogniverse/ShareCard";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { SectionHeader } from "@/components/section-header";
-import { LoadingState } from "@/components/loading-state";
-import { EmptyState } from "@/components/empty-state";
-import { ensureSession } from "@/lib/userClient";
-import { useAttempts } from "@/lib/hooks/useAttempts";
-import type { AttemptBundle } from "@/lib/domain/types";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { useCogniverse } from "@/lib/domain/mockData";
+import type { GoalFocus } from "@/lib/domain/types";
+import { cn } from "@/lib/utils";
 
-type Goal = "score" | "accuracy" | "speed" | "concepts";
-type Struggle = "selection" | "time" | "concepts" | "careless" | "anxiety" | "consistency";
+const goals: GoalFocus[] = ["Score", "Accuracy", "Speed", "Concepts"];
 
-type AnalyzeResponse = AttemptBundle & { id?: string };
-
-const GOALS: Array<{ id: Goal; label: string; hint: string }> = [
-  { id: "score", label: "Score", hint: "Improve overall performance" },
-  { id: "accuracy", label: "Accuracy", hint: "Reduce mistakes" },
-  { id: "speed", label: "Speed", hint: "Finish more questions" },
-  { id: "concepts", label: "Concepts", hint: "Fix weak foundations" },
-];
-
-const STRUGGLES: Array<{ id: Struggle; label: string }> = [
-  { id: "time", label: "Running out of time" },
-  { id: "careless", label: "Careless mistakes" },
-  { id: "concepts", label: "Concept gaps" },
-  { id: "selection", label: "Poor question selection" },
-  { id: "anxiety", label: "Stress/anxiety" },
-  { id: "consistency", label: "Inconsistent performance" },
-];
-
-function weeklyHoursFromMinutes(minutes: number) {
-  const weeklyHours = (minutes * 7) / 60;
-  if (weeklyHours < 10) return "<10" as const;
-  if (weeklyHours < 20) return "10-20" as const;
-  if (weeklyHours < 35) return "20-35" as const;
-  return "35+" as const;
-}
-
-export default function HomePage() {
+export default function LandingPage() {
   const router = useRouter();
-  const { attempts, loading: attemptsLoading, refresh: refreshAttempts } = useAttempts(8);
+  const { state, setIntake } = useCogniverse();
+  const currentAttemptId = state.report.currentAttemptId;
 
-  const [exam, setExam] = useState("");
-  const [goal, setGoal] = useState<Goal>("score");
-  const [struggle, setStruggle] = useState<Struggle>("time");
-  const [nextMockDate, setNextMockDate] = useState("");
-  const [dailyMinutes, setDailyMinutes] = useState(45);
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [lastGeneratedAttemptId, setLastGeneratedAttemptId] = useState<string | null>(null);
-
-  const weeklyHours = useMemo(() => weeklyHoursFromMinutes(dailyMinutes), [dailyMinutes]);
-  const canSubmit = useMemo(() => text.trim().length > 20 || files.length > 0, [text, files]);
-
-  useEffect(() => {
-    try {
-      const stored = window.sessionStorage.getItem("lastGeneratedAttemptId");
-      if (stored) setLastGeneratedAttemptId(stored);
-    } catch {
-      // noop in non-browser environments
-    }
-  }, []);
-
-  function openAttempt(attemptId: string) {
-    try {
-      if (attemptId === lastGeneratedAttemptId) {
-        window.sessionStorage.removeItem("lastGeneratedAttemptId");
-        setLastGeneratedAttemptId(null);
-      }
-    } catch {
-      // ignore storage failures
-    }
-    router.push(`/attempt/${attemptId}`);
-  }
-
-  async function handleSubmit() {
-    if (!canSubmit) {
-      toast.error("Paste your attempt text or upload a scorecard to continue.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await ensureSession();
-
-      const intake = {
-        goal,
-        hardest: struggle,
-        weekly_hours: weeklyHours,
-        next_mock_date: nextMockDate || undefined,
-        daily_minutes: String(dailyMinutes),
-      };
-
-      let res: Response;
-      if (files.length) {
-        const form = new FormData();
-        form.append("exam", exam || "AUTO");
-        form.append("intake", JSON.stringify(intake));
-        form.append("text", text);
-        files.forEach((file) => form.append("files", file));
-        res = await fetch("/api/analyze", { method: "POST", body: form });
-      } else {
-        res = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ exam: exam || "AUTO", intake, text }),
-        });
-      }
-
-      const json = (await res.json().catch(() => null)) as AnalyzeResponse | null;
-      if (!res.ok) {
-        throw new Error(json && "error" in json ? (json as any).error : "Failed to analyze attempt.");
-      }
-
-      const attemptId =
-        json?.attemptId || json?.id || json?.bundle?.attempt?.id || json?.attempt?.id;
-      if (!attemptId) {
-        throw new Error("Report generated but attempt id was missing.");
-      }
-
-      toast.success("Report ready. Focus on your next actions.");
-      setLastGeneratedAttemptId(attemptId);
-      try {
-        window.sessionStorage.setItem("lastGeneratedAttemptId", attemptId);
-      } catch {
-        // ignore storage failures
-      }
-      await refreshAttempts();
-      router.push(`/attempt/${attemptId}`);
-    } catch (err: any) {
-      toast.error(err?.message || "Could not generate report.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIntake(state.intake);
+    router.push(`/dashboard?attempt=${currentAttemptId}`);
+  };
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8">
-      <SectionHeader
-        eyebrow="Upload → Report → Actions"
-        title="Close the loop on every mock attempt"
-        description="Upload your attempt, get a report, complete the next actions, and track improvement on the next upload."
-      />
-
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card className="rounded-3xl border bg-white p-6 shadow-sm">
-          <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-900">Exam label</p>
-                <Input
-                  value={exam}
-                  onChange={(event) => setExam(event.target.value)}
-                  placeholder="CAT, JEE, NEET, GMAT..."
-                />
-                <p className="text-xs text-muted-foreground">Used for grouping attempts. Leave blank for auto-detect.</p>
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-900">Daily study minutes</p>
-                <Input
-                  type="number"
-                  min={15}
-                  max={240}
-                  value={dailyMinutes}
-                  onChange={(event) => setDailyMinutes(Number(event.target.value || 45))}
-                />
-                <p className="text-xs text-muted-foreground">Mapped to weekly hours: {weeklyHours}.</p>
-              </div>
+    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-10 px-4 pb-20 pt-12 sm:px-6 lg:px-10">
+      <section className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+        <div className="space-y-6">
+          <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-primary">
+            <Goal className="h-3.5 w-3.5" aria-hidden />
+            Coach-grade loop closing
+          </div>
+          <div className="space-y-4">
+            <h1 className="text-display max-w-2xl">Close the loop on every mock attempt.</h1>
+            <p className="max-w-xl text-base text-muted-foreground">
+              Upload a scorecard or paste your attempt text. We generate actions + a plan. Signal quality improves with more detail.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-full border border-border/70 bg-background/80 px-3 py-1.5">
+              <CalendarDays className="h-4 w-4 text-primary" aria-hidden />
+              Exam-agnostic (CAT/JEE/NEET/UPSC/etc.)
             </div>
-
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-slate-900">Primary goal</p>
-              <div className="grid gap-3 md:grid-cols-2">
-                {GOALS.map((item) => {
-                  const active = goal === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setGoal(item.id)}
-                      className={`rounded-2xl border p-4 text-left transition ${
-                        active ? "border-slate-900 bg-slate-900 text-white" : "bg-white hover:border-slate-400"
-                      }`}
-                    >
-                      <p className="text-sm font-semibold">{item.label}</p>
-                      <p className={`text-xs ${active ? "text-slate-100" : "text-muted-foreground"}`}>{item.hint}</p>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="flex items-center gap-2 rounded-full border border-border/70 bg-background/80 px-3 py-1.5">
+              <UploadCloud className="h-4 w-4 text-primary" aria-hidden />
+              PDF + images supported
             </div>
-
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-slate-900">Biggest struggle from the last attempt</p>
-              <div className="flex flex-wrap gap-2">
-                {STRUGGLES.map((item) => {
-                  const active = struggle === item.id;
-                  return (
-                    <Button
-                      key={item.id}
-                      type="button"
-                      variant={active ? "default" : "outline"}
-                      className="rounded-full"
-                      onClick={() => setStruggle(item.id)}
-                    >
-                      {item.label}
-                    </Button>
-                  );
-                })}
-              </div>
+          </div>
+        </div>
+        <div className="surface-card surface-glow flex flex-col gap-5 p-6 sm:p-8">
+          <div className="space-y-1">
+            <h2 className="text-2xl font-semibold">Generate your coach report</h2>
+            <p className="text-sm text-muted-foreground">Get a report you will actually want to screenshot.</p>
+          </div>
+          <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="exam-label">
+                Exam label (optional)
+              </label>
+              <Input
+                id="exam-label"
+                placeholder="e.g., CAT 2026"
+                value={state.intake.examLabel}
+                onChange={(event) => setIntake({ examLabel: event.target.value })}
+                className="rounded-2xl"
+              />
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-900">Next mock date (optional)</p>
-                <Input type="date" value={nextMockDate} onChange={(event) => setNextMockDate(event.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-900">Upload scorecard</p>
-                <Input
-                  type="file"
-                  accept=".pdf,image/*"
-                  multiple
-                  onChange={(event) => setFiles(Array.from(event.target.files || []))}
-                />
-                <p className="text-xs text-muted-foreground">PDFs and images are supported. You can also paste plain text below.</p>
-              </div>
+              <SelectField
+                label="Goal"
+                value={state.intake.goal}
+                onValueChange={(value) => setIntake({ goal: value as GoalFocus })}
+                options={goals.map((goal) => ({ label: goal, value: goal }))}
+              />
+              <SelectField
+                label="Next mock in"
+                value={state.intake.nextMockDays}
+                onValueChange={(value) => setIntake({ nextMockDays: value })}
+                options={[
+                  { label: "3 days", value: "3" },
+                  { label: "7 days", value: "7" },
+                  { label: "14 days", value: "14" },
+                  { label: "21 days", value: "21" },
+                  { label: "30+ days", value: "30+" },
+                ]}
+              />
+              <SelectField
+                label="Weekly hours"
+                value={state.intake.weeklyHours}
+                onValueChange={(value) => setIntake({ weeklyHours: value })}
+                options={[
+                  { label: "<10 hours", value: "<10" },
+                  { label: "10–20 hours", value: "10-20" },
+                  { label: "20–35 hours", value: "20-35" },
+                  { label: "35+ hours", value: "35+" },
+                ]}
+              />
+              <SelectField
+                label="Biggest struggle"
+                value={state.intake.biggestStruggle}
+                onValueChange={(value) => setIntake({ biggestStruggle: value })}
+                options={[
+                  { label: "Running out of time", value: "Running out of time" },
+                  { label: "Careless mistakes", value: "Careless" },
+                  { label: "Concept gaps", value: "Concept gaps" },
+                  { label: "Selection", value: "Selection" },
+                  { label: "Stress", value: "Stress" },
+                  { label: "Inconsistent", value: "Inconsistent" },
+                ]}
+              />
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm font-medium text-slate-900">Attempt text</p>
-              <Textarea
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                placeholder="Paste your sectional scores, accuracy, attempts, and any notes from the mock..."
-                className="min-h-[180px]"
-              />
-              <p className="text-xs text-muted-foreground">The report is only as good as the signal. Include scores, accuracy, and timing if possible.</p>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="rounded-full">
-                  Weekly hours: {weeklyHours}
-                </Badge>
-                <Badge variant="secondary" className="rounded-full">
-                  Flow: Upload → Report → Actions → Delta
-                </Badge>
-              </div>
-              <Button type="button" size="lg" disabled={submitting || !canSubmit} onClick={handleSubmit}>
-                {submitting ? "Generating report..." : "Generate report"}
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        <div className="space-y-4">
-          <SectionHeader
-            eyebrow="Recent attempts"
-            title="Pick up where you left off"
-            description="Every attempt should lead to a report and a checklist. Jump back into the loop."
-          />
-
-          {lastGeneratedAttemptId ? (
-            <Card className="rounded-2xl border-slate-900 bg-slate-900 p-4 text-white shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold">Latest report ready</p>
-                  <p className="text-xs text-slate-200">
-                    Attempt ID · {lastGeneratedAttemptId}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="border-white/20 bg-white text-slate-900 hover:bg-white/90"
-                  onClick={() => openAttempt(lastGeneratedAttemptId)}
-                >
-                  Open report
-                </Button>
-              </div>
-            </Card>
-          ) : null}
-
-          {attemptsLoading ? (
-            <LoadingState lines={6} />
-          ) : attempts.length ? (
-            <div className="space-y-3">
-              {attempts.map((attempt) => (
-                <Card
-                  key={attempt.id}
-                  className={`rounded-2xl border bg-white p-4 transition ${
-                    attempt.id === lastGeneratedAttemptId
-                      ? "border-slate-900 ring-2 ring-slate-900/10"
-                      : "hover:border-slate-300"
-                  }`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-900">
-                          Attempt {attempt.id.slice(-6)}
-                        </p>
-                        {attempt.id === lastGeneratedAttemptId ? (
-                          <Badge className="rounded-full bg-slate-900 text-white hover:bg-slate-900">
-                            New
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(attempt.createdAt || attempt.created_at).toLocaleString()} · {attempt.sourceType || attempt.source_type}
-                      </p>
-                    </div>
-                    <Button type="button" variant="outline" onClick={() => openAttempt(attempt.id)}>
-                      Open report
-                    </Button>
+              <p className="text-sm font-medium">Upload attempt</p>
+              <div className="flex flex-col gap-3 rounded-[1.75rem] border border-dashed border-primary/35 bg-primary/5 p-5 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="font-medium text-foreground">Drop PDF or images here</p>
+                    <p className="text-xs text-muted-foreground">UI only for now. We will plug in parsing hooks next.</p>
                   </div>
-                </Card>
-              ))}
-              <Button type="button" variant="ghost" className="w-full" onClick={() => router.push("/history")}>
-                View full history
-              </Button>
+                  <Button type="button" variant="secondary" className="tap-scale rounded-full">
+                    Choose files
+                  </Button>
+                </div>
+                <Separator />
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">or paste attempt text</p>
+                  <Input className="rounded-2xl" placeholder="Paste your attempt breakdown here..." />
+                </div>
+              </div>
             </div>
-          ) : (
-            <EmptyState
-              title="No attempts yet"
-              description="Upload your first attempt to generate a report and start tracking progress."
-              action={
-                <Button type="button" onClick={handleSubmit} disabled={submitting || !canSubmit}>
-                  Generate report
-                </Button>
-              }
-            />
-          )}
+
+            <Button type="submit" className="tap-scale mt-2 rounded-2xl text-sm font-semibold">
+              Generate report
+              <ArrowRight className="ml-2 h-4 w-4" aria-hidden />
+            </Button>
+          </form>
         </div>
-      </div>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="surface-card flex flex-col gap-4 p-6">
+          <div className="space-y-2">
+            <h2 className="text-2xl font-semibold">Why students keep sharing this</h2>
+            <p className="text-sm text-muted-foreground">
+              We don&apos;t just analyze. We prescribe. Every insight is structured to become a screenshot-ready coach card.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              {
+                title: "Signal quality",
+                detail: "Clear confidence and assumptions",
+              },
+              {
+                title: "Next best action",
+                detail: "Time-boxed and evidence driven",
+              },
+              {
+                title: "Pathway map",
+                detail: "Metro-style plan you can follow",
+              },
+            ].map((item) => (
+              <div key={item.title} className={cn("rounded-3xl border border-border/70 bg-background/80 p-4", "tap-scale transition hover:border-primary/40")}>
+                <p className="text-sm font-semibold">{item.title}</p>
+                <p className="text-xs text-muted-foreground">{item.detail}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <ShareCard variant="summary" report={state.report} />
+      </section>
     </main>
+  );
+}
+
+type SelectFieldProps = {
+  label: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  options: Array<{ label: string; value: string }>;
+};
+
+function SelectField({ label, value, onValueChange, options }: SelectFieldProps) {
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium">{label}</label>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className="rounded-2xl">
+          <SelectValue placeholder={label} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
