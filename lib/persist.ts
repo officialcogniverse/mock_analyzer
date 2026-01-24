@@ -35,6 +35,29 @@ export type UserProgressDoc = {
       notes?: string;
     }
   >;
+  practiceMetrics?: Record<
+    string,
+    {
+      accuracy?: number;
+      time_min?: number;
+      score?: number;
+      notes?: string;
+    }
+  >;
+  sectionTimings?: Array<{
+    section: string;
+    minutes: number | null;
+    order?: number | null;
+    source?: "manual" | "ocr";
+  }>;
+  reminder?: {
+    time?: string | null;
+    channel?: "whatsapp" | "email" | "sms" | "push" | "none";
+  };
+  planAdherence?: Array<{
+    date: string;
+    done: boolean;
+  }>;
   confidence?: number; // 0..100
   updatedAt?: Date;
   createdAt?: Date;
@@ -250,6 +273,33 @@ export async function listAttempts(userId: string, limit = 20) {
   }));
 }
 
+export async function listAttemptsForExport(userId: string, limit = 200) {
+  const db = await getDb();
+  const attempts = db.collection<any>("mock_attempts");
+
+  const rows = await attempts
+    .find({ userId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .toArray();
+
+  return rows.map((r) => ({
+    id: r._id.toString(),
+    exam: r.exam,
+    createdAt:
+      r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt || ""),
+    summary: r.report?.summary ?? "",
+    estimated_score: r.report?.estimated_score ?? null,
+    percentile: r.report?.percentile ?? null,
+    accuracy: r.report?.accuracy ?? r.report?.accuracy_pct ?? null,
+    error_types: r.report?.error_types ?? {},
+    strengths: r.report?.strengths ?? [],
+    weaknesses: r.report?.weaknesses ?? [],
+    section_breakdown: r.report?.section_breakdown ?? [],
+    meta: r.report?.meta ?? {},
+  }));
+}
+
 /**
  * List attempts for insights (keep payload small + stable for python)
  * IMPORTANT: return createdAt as ISO string so python cadence/streak is reliable.
@@ -278,6 +328,30 @@ export async function listAttemptsForInsights(
     createdAt:
       r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt || ""),
     exam: r.exam,
+    report: r.report,
+  }));
+}
+
+export async function listCohortAttempts(exam?: string | null, limit = 300) {
+  const db = await getDb();
+  const attempts = db.collection<any>("mock_attempts");
+
+  const q: any = {};
+  if (exam) q.exam = String(exam).toUpperCase();
+
+  const rows = await attempts
+    .find(q)
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .project({ userId: 1, createdAt: 1, exam: 1, report: 1 })
+    .toArray();
+
+  return rows.map((r) => ({
+    id: r._id.toString(),
+    userId: r.userId,
+    exam: r.exam,
+    createdAt:
+      r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt || ""),
     report: r.report,
   }));
 }
@@ -560,4 +634,96 @@ export async function listStrategyMemory(userId: string, exam?: string, limit = 
     _is_fallback: r._is_fallback,
     createdAt: r.createdAt,
   }));
+}
+
+export async function createOtpRequest(email: string, code: string) {
+  const db = await getDb();
+  const col = db.collection<any>("otp_requests");
+
+  const normalized = email.trim().toLowerCase();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
+
+  await col.insertOne({
+    email: normalized,
+    code,
+    createdAt: now,
+    expiresAt,
+  });
+
+  return { email: normalized, expiresAt };
+}
+
+export async function verifyOtpCode(email: string, code: string) {
+  const db = await getDb();
+  const col = db.collection<any>("otp_requests");
+
+  const normalized = email.trim().toLowerCase();
+  const now = new Date();
+
+  const match = await col.findOne(
+    { email: normalized, code, expiresAt: { $gt: now } },
+    { sort: { createdAt: -1 } }
+  );
+
+  return !!match;
+}
+
+export async function migrateUserData(params: { fromUserId: string; toUserId: string }) {
+  const { fromUserId, toUserId } = params;
+  if (!fromUserId || !toUserId || fromUserId === toUserId) return;
+
+  const db = await getDb();
+  const attempts = db.collection<any>("mock_attempts");
+  const progress = db.collection<UserProgressDoc>("user_progress");
+  const learning = db.collection<UserLearningStateDoc>("user_learning_state");
+  const strategy = db.collection<StrategyMemoryDoc>("strategy_memory");
+  const users = db.collection<any>("users");
+
+  await attempts.updateMany({ userId: fromUserId }, { $set: { userId: toUserId } });
+  await learning.updateMany({ userId: fromUserId }, { $set: { userId: toUserId } });
+  await strategy.updateMany({ userId: fromUserId }, { $set: { userId: toUserId } });
+
+  const fromProgress = await progress.find({ userId: fromUserId }).toArray();
+  for (const doc of fromProgress) {
+    const existing = await progress.findOne({ userId: toUserId, exam: doc.exam });
+    if (!existing) {
+      await progress.updateOne(
+        { _id: doc._id },
+        { $set: { userId: toUserId } }
+      );
+      continue;
+    }
+
+    const mergedProbes = [
+      ...(existing.probes || []),
+      ...(doc.probes || []),
+    ];
+    const uniqueProbes = Array.from(
+      new Map(mergedProbes.map((p) => [p.id, p])).values()
+    );
+
+    const merged = {
+      probes: uniqueProbes,
+      probeMetrics: { ...(existing.probeMetrics || {}), ...(doc.probeMetrics || {}) },
+      practiceMetrics: {
+        ...(existing.practiceMetrics || {}),
+        ...(doc.practiceMetrics || {}),
+      },
+      sectionTimings: doc.sectionTimings || existing.sectionTimings,
+      reminder: doc.reminder || existing.reminder,
+      planAdherence: doc.planAdherence || existing.planAdherence,
+      confidence:
+        typeof doc.confidence === "number" ? doc.confidence : existing.confidence,
+      updatedAt: new Date(),
+    };
+
+    await progress.updateOne(
+      { userId: toUserId, exam: doc.exam },
+      { $set: merged }
+    );
+    await progress.deleteOne({ _id: doc._id });
+  }
+
+  await users.deleteOne({ _id: fromUserId });
 }

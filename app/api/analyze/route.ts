@@ -3,6 +3,7 @@ import { analyzeMock } from "@/lib/analyzer";
 import { extractTextFromPdf } from "@/lib/extractText";
 import { detectExamFromText } from "@/lib/examDetect";
 import { normalizeExam } from "@/lib/exams";
+import { normalizeSectionBreakdown } from "@/lib/examSections";
 import type { Exam, Intake } from "@/lib/types";
 import {
   upsertUser,
@@ -347,17 +348,20 @@ export async function POST(req: Request) {
     // ✅ normalize the shape to always be the report object
     const report = unwrapReport(rawOut);
 
+    // ✅ exam-specific schema enforcement (section naming + ordering)
+    const normalizedReport = normalizeSectionBreakdown(exam, report);
+
     // ✅ enrich meta (safe, doesn’t affect UI if unused)
-    const focusXP = computeFocusXP(report);
-    report.meta = report.meta || {};
-    report.meta.focusXP = focusXP;
-    report.meta.userExam = exam;
-    report.meta.generatedAt = new Date().toISOString();
-    report.meta.analyzer_backend = usePython ? "python" : "ts";
+    const focusXP = computeFocusXP(normalizedReport);
+    normalizedReport.meta = normalizedReport.meta || {};
+    normalizedReport.meta.focusXP = focusXP;
+    normalizedReport.meta.userExam = exam;
+    normalizedReport.meta.generatedAt = new Date().toISOString();
+    normalizedReport.meta.analyzer_backend = usePython ? "python" : "ts";
 
     // ✅ NEW: adaptive strategy scaffold (coverage/confidence/questions)
-    const scaffold = computeSignalScaffold({ exam, intake, report });
-    report.meta.strategy = {
+    const scaffold = computeSignalScaffold({ exam, intake, report: normalizedReport });
+    normalizedReport.meta.strategy = {
       confidence_score: scaffold.confidence_score,
       confidence_band: scaffold.confidence_band,
       missing_signals: scaffold.missing_signals,
@@ -371,19 +375,19 @@ export async function POST(req: Request) {
       exam,
       intake,
       rawText: text,
-      report,
+      report: normalizedReport,
     });
     // ✅ Strategy Memory snapshot (Step 5)
 try {
-  const strategyPlan = report?.meta?.strategy_plan;
-  if (strategyPlan) {
-    await saveStrategyMemorySnapshot({
-      userId: session.userId,
-      exam,
-      attemptId,
-      strategyPlan,
-    });
-  }
+      const strategyPlan = normalizedReport?.meta?.strategy_plan;
+      if (strategyPlan) {
+        await saveStrategyMemorySnapshot({
+          userId: session.userId,
+          exam,
+          attemptId,
+          strategyPlan,
+        });
+      }
 } catch (e: any) {
   // never block analyze
   console.warn("Strategy memory snapshot failed:", e?.message ?? e);
@@ -394,7 +398,7 @@ try {
       await updateUserLearningStateFromReport({
         userId: session.userId,
         exam,
-        report,
+        report: normalizedReport,
    attemptId,
       });
     } catch (e: any) {
