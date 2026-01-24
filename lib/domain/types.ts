@@ -4,7 +4,7 @@ export type SignalQuality = "Low" | "Medium" | "High";
 
 export type Severity = "low" | "medium" | "high" | "critical";
 
-export type StrategyConfidenceSource = "attempt" | "self-report" | "derived" | "historical";
+export type StrategyConfidenceSource = "attempt" | "self-report" | "derived" | "historical" | "assumption";
 
 export interface Attempt {
   id: string;
@@ -25,6 +25,7 @@ export interface Attempt {
     correct: number;
   }>;
   notes?: string;
+  source?: "upload" | "manual" | "text";
 }
 
 export interface PersonaHypothesis {
@@ -64,6 +65,8 @@ export interface NextBestAction {
   energy: "low" | "medium" | "high";
   impact: number;
   isCompleted?: boolean;
+  locked?: boolean;
+  lockReason?: string;
 }
 
 export interface PlanTask {
@@ -75,6 +78,7 @@ export interface PlanTask {
   why: string;
   completed?: boolean;
   tags: string[];
+  locked?: boolean;
 }
 
 export interface PlanDay {
@@ -87,6 +91,7 @@ export interface PlanDay {
   milestone?: string;
   status: "completed" | "current" | "upcoming";
   energyHint: "low" | "medium" | "high";
+  locked?: boolean;
 }
 
 export interface Note {
@@ -120,6 +125,41 @@ export interface StrategyRecommendation {
   confidenceNotes: string[];
 }
 
+export type PlanVariantDays = 3 | 5 | 7;
+
+export interface ReportHero {
+  primaryBottleneck: string;
+  upliftRange: string;
+  dailyCommitmentMinutes: number;
+}
+
+export interface TrustBreakdown {
+  signals: string[];
+  assumptions: string[];
+  confidenceBand: "high" | "medium" | "low";
+  reasoning: string;
+  locked?: boolean;
+}
+
+export interface PaywallState {
+  isPremium: boolean;
+  lockedActionIds: string[];
+  lockedPlan: boolean;
+  lockedReasoning: boolean;
+  lockedProgress: boolean;
+  ctaLabel: string;
+  ctaHint: string;
+}
+
+export interface LearningSnapshot {
+  exam: string;
+  primaryBottleneck: string;
+  chosenStrategy: string;
+  actionCompletionRate: number;
+  nextMockOutcome?: string | null;
+  lastUpdated: string;
+}
+
 export interface Report {
   id: string;
   generatedAt: string;
@@ -148,6 +188,12 @@ export interface Report {
     confidenceChange: number;
     date: string;
   }>;
+  hero: ReportHero;
+  trust: TrustBreakdown;
+  paywall: PaywallState;
+  learning: LearningSnapshot;
+  planVariant: PlanVariantDays;
+  availablePlanVariants: PlanVariantDays[];
 }
 
 export interface IntakeFormState {
@@ -156,6 +202,7 @@ export interface IntakeFormState {
   nextMockDays: string;
   weeklyHours: string;
   biggestStruggle: string;
+  dailyCommitmentMinutes: string;
 }
 
 export interface TuneStrategyAnswers {

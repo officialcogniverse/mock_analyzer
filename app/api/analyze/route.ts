@@ -19,7 +19,6 @@ import {
 } from "@/lib/persist";
 import { analyzeViaPython } from "@/lib/pythonClient";
 import { attachSessionCookie, ensureSession } from "@/lib/session";
-import { extractTextFromImages } from "@/lib/extractTextFromImages";
 import { fireAndForgetEvent } from "@/lib/events";
 import { z } from "zod";
 import { normalizeReport } from "@/lib/report";
@@ -54,6 +53,8 @@ const intakeSchema = z
   .passthrough();
 
 const DEV_LOG = process.env.NODE_ENV !== "production";
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const PDF_MIME = "application/pdf";
 
 function normalizeTextFromManual(manual?: Record<string, string>) {
   if (!manual) return "";
@@ -248,15 +249,27 @@ export async function POST(req: Request) {
       ];
 
       if (allFiles.length) {
-        const pdfFiles = allFiles.filter((file) => file.type === "application/pdf");
-        const imagePayload = await Promise.all(
-          allFiles
-            .filter((file) => file.type !== "application/pdf")
-            .map(async (file) => ({
-              mime: file.type || "image/png",
-              data: Buffer.from(await file.arrayBuffer()),
-            }))
-        );
+        const nonPdf = allFiles.filter((file) => file.type && file.type !== PDF_MIME);
+        if (nonPdf.length) {
+          const res = NextResponse.json(
+            { error: "Only PDF scorecards are supported right now. Export your mock as a PDF and upload it again." },
+            { status: 400 },
+          );
+          if (session.isNew) attachSessionCookie(res, session);
+          return res;
+        }
+
+        const oversized = allFiles.find((file) => file.size > MAX_FILE_BYTES);
+        if (oversized) {
+          const res = NextResponse.json(
+            { error: "PDF is too large. Please upload a file under 8MB." },
+            { status: 400 },
+          );
+          if (session.isNew) attachSessionCookie(res, session);
+          return res;
+        }
+
+        const pdfFiles = allFiles.filter((file) => file.type === PDF_MIME);
 
         const pdfText = (
           await Promise.all(
@@ -269,8 +282,7 @@ export async function POST(req: Request) {
           .filter(Boolean)
           .join("\n\n");
 
-        const imageText = imagePayload.length ? await extractTextFromImages(imagePayload) : "";
-        text = [pdfText, imageText].filter(Boolean).join("\n\n").trim();
+        text = pdfText.trim();
       }
 
       const manualRaw = form.get("manual");
