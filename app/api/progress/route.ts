@@ -8,11 +8,11 @@ import {
   type Probe,
 } from "@/lib/persist";
 import { attachUserIdCookie, ensureUserId } from "@/lib/session";
-import { EXAMS } from "@/lib/exams";
+import { normalizeExam } from "@/lib/exams";
 
 export const runtime = "nodejs";
 
-const examSchema = z.enum(EXAMS);
+const examSchema = z.string().optional();
 
 const probeSchema = z.object({
   id: z.string().min(1),
@@ -99,18 +99,8 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
 
   const examRaw = url.searchParams.get("exam") || "";
-  const parsed = examSchema.safeParse(String(examRaw).toUpperCase());
-
-  if (!parsed.success) {
-    const res = NextResponse.json(
-      { error: `Missing/invalid exam. Use ?exam=${EXAMS.join("|")}` },
-      { status: 400 }
-    );
-    if (session.isNew) attachUserIdCookie(res, session.userId);
-    return res;
-  }
-
-  const exam = parsed.data;
+  const parsed = examSchema.safeParse(examRaw);
+  const exam = normalizeExam(parsed.success ? parsed.data : examRaw) || "GENERIC";
 
   await upsertUser(session.userId);
 
@@ -165,11 +155,13 @@ export async function POST(req: Request) {
 
     await upsertUser(session.userId);
 
+    const examLabel = normalizeExam(exam) || "GENERIC";
+
     // Case A: probe toggle
     if (probe && typeof done === "boolean") {
       const out = await toggleProbe({
         userId: session.userId,
-        exam,
+        exam: examLabel,
         probe: probe as Probe,
         done,
       });
@@ -215,7 +207,7 @@ export async function POST(req: Request) {
 
     const out = await upsertUserProgress({
       userId: session.userId,
-      exam,
+      exam: examLabel,
       patch,
     });
 

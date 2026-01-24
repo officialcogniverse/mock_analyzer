@@ -16,9 +16,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { EXAMS, isExam, type Exam } from "@/lib/exams";
+import { normalizeExam } from "@/lib/exams";
 import { ensureSession } from "@/lib/userClient";
-type ExamFilter = "ALL" | Exam;
 
 type HistoryItem = {
   id: string;
@@ -39,7 +38,7 @@ type UserDoc = {
 
 type ProgressDoc = {
   userId?: string;
-  exam: Exam;
+  exam: string;
   nextMockInDays?: number;
   minutesPerDay?: number;
   confidence?: number; // 0..100
@@ -75,7 +74,7 @@ function toDayKey(d: Date) {
 }
 
 function normExam(v: any) {
-  return String(v || "").trim().toUpperCase();
+  return normalizeExam(String(v || "")) || "GENERIC";
 }
 
 function titleCase(x: string) {
@@ -162,9 +161,7 @@ export default function HistoryDashboard() {
   const [coachName, setCoachName] = useState("Prof. Astra");
   const [saving, setSaving] = useState(false);
 
-  // UI controls
-  const [examFilter, setExamFilter] = useState<ExamFilter>("ALL");
-
+  // UI controls (exam metadata is informational only)
   // Journey pointer (optional)
   const [lastReportId, setLastReportId] = useState<string | null>(null);
   useEffect(() => {
@@ -190,12 +187,7 @@ export default function HistoryDashboard() {
     };
   }, []);
 
-  const filtered = useMemo(() => {
-    if (examFilter === "ALL") return items;
-    return items.filter((x) => normExam(x.exam) === examFilter);
-  }, [items, examFilter]);
-
-  const activeList = filtered;
+  const activeList = useMemo(() => items, [items]);
   const latest = activeList[0];
   const prev = activeList[1];
 
@@ -275,10 +267,9 @@ export default function HistoryDashboard() {
     }
   }
 
-  function resolveProgressExam(list: HistoryItem[], filter: ExamFilter): Exam | null {
-    if (filter !== "ALL") return filter;
-    const latestExam = normExam(list?.[0]?.exam);
-    return isExam(latestExam) ? (latestExam as Exam) : null;
+  function resolveProgressExam(list: HistoryItem[]) {
+    if (!list.length) return null;
+    return normExam(list?.[0]?.exam) || "GENERIC";
   }
 
   async function loadAll() {
@@ -308,13 +299,12 @@ export default function HistoryDashboard() {
       setCoachName(u?.coach?.coach_name || "Prof. Astra");
 
       // insights: allow ALL (empty exam)
-      const exForInsights = examFilter === "ALL" ? "" : examFilter;
-      const insRes = await fetch(`/api/insights?exam=${encodeURIComponent(exForInsights)}&lastN=10`);
+      const insRes = await fetch(`/api/insights?lastN=10`);
       const insJson = await insRes.json();
       setInsights(insRes.ok ? insJson : null);
 
       // progress: per exam only (resolve from filter or latest attempt)
-      const exForProgress = resolveProgressExam(list, examFilter);
+      const exForProgress = resolveProgressExam(list);
       if (exForProgress) {
         const prRes = await fetch(`/api/progress?exam=${exForProgress}`);
         const prJson = (await prRes.json()) as ProgressApiResponse;
@@ -322,9 +312,7 @@ export default function HistoryDashboard() {
       }
 
       setCohortLoading(true);
-      const cohortRes = await fetch(
-        `/api/cohort-insights?exam=${encodeURIComponent(exForInsights)}&limit=250`
-      );
+      const cohortRes = await fetch(`/api/cohort-insights?limit=250`);
       const cohortJson = await cohortRes.json();
       if (cohortRes.ok) setCohortInsights(cohortJson as CohortInsights);
       setCohortLoading(false);
@@ -353,7 +341,7 @@ export default function HistoryDashboard() {
     if (!sessionReady) return;
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionReady, examFilter]);
+  }, [sessionReady]);
 
   useEffect(() => {
     if (!progressDoc) return;
@@ -449,10 +437,11 @@ export default function HistoryDashboard() {
   const confText = confLabel(conf);
 
   const progressExam = progressDoc?.exam || null;
+  const examBadge = activeList[0]?.exam ? normExam(activeList[0].exam) : "All attempts";
 
   const nextActionExam = useMemo(
-    () => resolveProgressExam(activeList, examFilter) || progressExam || null,
-    [activeList, examFilter, progressExam]
+    () => resolveProgressExam(activeList) || progressExam || null,
+    [activeList, progressExam]
   );
 
   const adherenceMap = useMemo(() => {
@@ -656,25 +645,11 @@ export default function HistoryDashboard() {
                 )}
               </div>
               <div className="text-xs text-muted-foreground">
-                {progressExam ? `Exam: ${progressExam}` : "Per-exam progress"}
+                {progressExam ? `Attempt group: ${progressExam}` : "All attempts"}
               </div>
             </div>
           </div>
         </Card>
-
-        {/* Filters */}
-        <div className="flex flex-wrap gap-2">
-          {(["ALL", ...EXAMS] as const).map((x) => (
-            <Button
-              key={x}
-              type="button"
-              variant={examFilter === x ? "default" : "outline"}
-              onClick={() => setExamFilter(x)}
-            >
-              {x === "ALL" ? "All exams" : x}
-            </Button>
-          ))}
-        </div>
 
         {/* Dashboard cards */}
         <div className="grid md:grid-cols-4 gap-4">
@@ -712,7 +687,7 @@ export default function HistoryDashboard() {
                 variant="secondary"
                 className="rounded-full shrink-0 max-w-full whitespace-normal break-words"
               >
-                {examFilter === "ALL" ? "All exams" : examFilter}
+                {examBadge}
               </Badge>
             </div>
 
@@ -818,7 +793,7 @@ export default function HistoryDashboard() {
             <div className="flex items-center justify-between">
               <div className="text-lg font-semibold">🌍 Cohort insights</div>
               <Badge variant="secondary" className="rounded-full">
-                {examFilter === "ALL" ? "All exams" : examFilter}
+                {examBadge}
               </Badge>
             </div>
 

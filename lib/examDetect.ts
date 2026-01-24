@@ -1,9 +1,8 @@
-import type { Exam } from "@/lib/types";
+import { KNOWN_EXAMS, type KnownExam } from "@/lib/exams";
 
-export function detectExamFromText(text: string): Exam | null {
+export function detectExamFromText(text: string): KnownExam | null {
   const t = text.toLowerCase();
 
-  // CAT signals
   const catHits =
     (t.includes("varc") ? 1 : 0) +
     (t.includes("dilr") ? 1 : 0) +
@@ -11,7 +10,6 @@ export function detectExamFromText(text: string): Exam | null {
     (t.includes("percentile") ? 1 : 0) +
     (t.includes("cat") ? 1 : 0);
 
-  // NEET signals
   const neetHits =
     (t.includes("neet") ? 2 : 0) +
     (t.includes("biology") ? 1 : 0) +
@@ -21,7 +19,6 @@ export function detectExamFromText(text: string): Exam | null {
     (t.includes("chemistry") ? 1 : 0) +
     (t.includes("ncert") ? 1 : 0);
 
-  // JEE signals
   const jeeHits =
     (t.includes("jee") ? 2 : 0) +
     (t.includes("mains") ? 1 : 0) +
@@ -31,17 +28,14 @@ export function detectExamFromText(text: string): Exam | null {
     (t.includes("mathematics") ? 1 : 0) +
     (t.includes("maths") ? 1 : 0);
 
-  const scores: Record<Exam, number> = {
+  const scores: Record<KnownExam, number> = {
     CAT: catHits,
     NEET: neetHits,
     JEE: jeeHits,
   };
 
-  const best = (Object.keys(scores) as Exam[]).sort(
-    (a, b) => scores[b] - scores[a]
-  )[0];
+  const best = (KNOWN_EXAMS as KnownExam[]).sort((a, b) => scores[b] - scores[a])[0];
 
-  // require at least some confidence
   if (scores[best] < 3) return null;
   return best;
 }

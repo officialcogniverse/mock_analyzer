@@ -1,63 +1,51 @@
-import { EXAMS, type Exam, normalizeExam } from "@/lib/exams";
+import { KNOWN_EXAMS, type KnownExam, normalizeExam } from "@/lib/exams";
 
 export type ExamPatternItem = {
-  label: string;
-  detail: string;
+  title: string;
+  details: string;
 };
 
-export const EXAM_PATTERN_CHECKLIST: Record<Exam, ExamPatternItem[]> = {
+export const EXAM_PATTERN_CHECKLIST: Record<KnownExam, ExamPatternItem[]> = {
   CAT: [
     {
-      label: "Section weight",
-      detail: "VARC, DILR, QA are balanced; skipping one can sink percentile.",
+      title: "Three sections, fixed order",
+      details: "Plan a hard stop for each section so no single section eats the clock.",
     },
     {
-      label: "Time pressure",
-      detail: "Tight sectional timers demand pacing checkpoints every 10–12 min.",
+      title: "Pass-based selection",
+      details: "Two-pass approach: skim, shortlist, then execute.",
     },
     {
-      label: "Negative marking",
-      detail: "Wrong answers penalize; accuracy control beats extra guesses.",
-    },
-    {
-      label: "Question strategy",
-      detail: "Smart selection + leaving traps is a rank-defining habit.",
+      title: "Accuracy protection",
+      details: "Avoid late-guessing streaks. Exit if confidence drops.",
     },
   ],
   NEET: [
     {
-      label: "Section weight",
-      detail: "Biology dominates; Physics + Chemistry decide rank jumps.",
+      title: "High question volume",
+      details: "Use speed ladders and time checkpoints to avoid mid-test fatigue.",
     },
     {
-      label: "Time pressure",
-      detail: "Speed matters across 180 questions; 45–50 sec per question target.",
+      title: "Negative marking",
+      details: "Set a strict guessing threshold for low-confidence items.",
     },
     {
-      label: "Negative marking",
-      detail: "−1 per wrong; disciplined elimination protects score.",
-    },
-    {
-      label: "Question strategy",
-      detail: "Accuracy-first in Bio, timed sprints in Physics/Chem.",
+      title: "NCERT alignment",
+      details: "Anchor revisions to NCERT phrasing for accuracy boosts.",
     },
   ],
   JEE: [
     {
-      label: "Section weight",
-      detail: "Phy/Chem/Math balance varies by shift; keep all three warm.",
+      title: "Multi-step reasoning",
+      details: "Mark long chains early; return after easy wins.",
     },
     {
-      label: "Time pressure",
-      detail: "Mix of single + numerical types: pace for 90–100 sec per Q avg.",
+      title: "Balanced subject split",
+      details: "Avoid sinking time into a single subject early.",
     },
     {
-      label: "Negative marking",
-      detail: "MCQ penalties apply; leave low-confidence guesses.",
-    },
-    {
-      label: "Question strategy",
-      detail: "High ROI: solve easy wins first, then selective tough ones.",
+      title: "Error mitigation",
+      details: "Track the top 2 mistake types and address them daily.",
     },
   ],
 };
@@ -65,6 +53,6 @@ export const EXAM_PATTERN_CHECKLIST: Record<Exam, ExamPatternItem[]> = {
 export function getExamPatternChecklist(exam?: string | null) {
   const normalized = normalizeExam(exam || "");
   if (!normalized) return null;
-  if (!EXAMS.includes(normalized)) return null;
-  return EXAM_PATTERN_CHECKLIST[normalized];
+  if (!KNOWN_EXAMS.includes(normalized as KnownExam)) return null;
+  return EXAM_PATTERN_CHECKLIST[normalized as KnownExam];
 }
