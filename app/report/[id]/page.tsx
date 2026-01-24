@@ -9,7 +9,6 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExamPatternChecklist } from "@/components/ExamPatternChecklist";
-import { NextBestActionRail } from "@/components/next-best-action-rail";
 import {
   Accordion,
   AccordionContent,
@@ -1142,8 +1141,58 @@ const probes: Probe[] = useMemo(() => {
           </TabsList>
 
           {/* SUMMARY */}
-          <TabsContent value="summary" className="space-y-4">
-            <div className="grid gap-4 lg:grid-cols-3">
+          <TabsContent value="summary" className="space-y-6">
+            <section className="grid gap-4 lg:grid-cols-3">
+              <Card className="p-5 rounded-2xl space-y-2">
+                <div className="text-sm text-muted-foreground">Next mock readiness</div>
+                <div className="text-3xl font-bold">{confidenceScore}</div>
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>{confidenceLabel} confidence</span>
+                  <span>Target: {nextMockDateLabel}</span>
+                </div>
+                <Progress value={confidenceScore} />
+              </Card>
+
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">Learning curve</div>
+                  <Badge variant="secondary" className="rounded-full">
+                    {curveDelta >= 0 ? `+${curveDelta}` : curveDelta} XP
+                  </Badge>
+                </div>
+                <div className="h-24">
+                  {curveValues.length ? (
+                    <svg viewBox="0 0 320 120" className="w-full h-full">
+                      <defs>
+                        <linearGradient id={curveGradientId} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="rgb(99 102 241)" stopOpacity="0.35" />
+                          <stop offset="100%" stopColor="rgb(99 102 241)" stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <path
+                        d={curvePath(curveValues, 320, 120)}
+                        fill="none"
+                        stroke="rgb(99 102 241)"
+                        strokeWidth="3"
+                      />
+                      <path
+                        d={`${curvePath(curveValues, 320, 120)} L 304 112 L 16 112 Z`}
+                        fill={`url(#${curveGradientId})`}
+                      />
+                    </svg>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      Upload more mocks to plot your curve.
+                    </div>
+                  )}
+                </div>
+                {scoreDeltaLabel ? (
+                  <div className="text-xs text-muted-foreground">
+                    Rolling delta: {scoreDeltaLabel}
+                  </div>
+                ) : null}
+              </Card>
+
               <Card className="p-5 rounded-2xl space-y-2">
                 <div className="text-sm text-muted-foreground">Main mistake pattern</div>
                 <div className="text-lg font-semibold">
@@ -1151,24 +1200,59 @@ const probes: Probe[] = useMemo(() => {
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {mainMistake
-                    ? `${mainMistake.value}% of your recent errors · ${mainMistake.detail}`
+                    ? `${mainMistake.value}% of recent errors · ${mainMistake.detail}`
                     : "Upload a few mocks to surface your dominant pattern."}
+                </div>
+                <div className="text-xs text-muted-foreground">{whyItMatters}</div>
+              </Card>
+            </section>
+
+            <section className="grid gap-4 lg:grid-cols-3">
+              <Card className="p-5 rounded-2xl space-y-2 lg:col-span-2">
+                <div className="text-sm text-muted-foreground">Storyline</div>
+                <div className="text-lg font-semibold">From mock → insight → next best action</div>
+                <div className="text-sm text-muted-foreground">{storyLine}</div>
+                <div className="text-xs text-muted-foreground">
+                  Loop: Upload → Diagnose → Probes → Next mock.
                 </div>
               </Card>
 
-              <Card className="p-5 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm text-muted-foreground">Top 3 actions</div>
-                  <Badge variant="secondary" className="rounded-full">
-                    Ranked
-                  </Badge>
+              <Card className="p-5 rounded-2xl space-y-2">
+                <div className="text-sm text-muted-foreground">Learning behavior signals</div>
+                <div className="flex flex-wrap gap-2">
+                  {lbChips.length ? (
+                    lbChips.map((chip) => (
+                      <Badge
+                        key={chip.label}
+                        variant={chip.variant ?? "secondary"}
+                        className="rounded-full"
+                      >
+                        {chip.label}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      Add 2–3 mocks to surface cadence + responsiveness.
+                    </span>
+                  )}
                 </div>
+                <ul className="text-xs text-muted-foreground space-y-1">
+                  {learningUpdateLines.map((line, idx) => (
+                    <li key={idx}>{line}</li>
+                  ))}
+                </ul>
+              </Card>
+            </section>
+
+            <section className="grid gap-4 lg:grid-cols-2">
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="text-lg font-semibold">Next best actions</div>
                 {nextActions.length === 0 && !nextActionsLoading ? (
                   <div className="text-sm text-muted-foreground">
                     Run another mock to unlock personalized actions.
                   </div>
                 ) : (
-                  <div className="space-y-2 text-sm">
+                  <div className="grid gap-3">
                     {nextActions.slice(0, 3).map((action, idx) => (
                       <div key={action.id} className="rounded-xl border bg-white p-3">
                         <div className="flex items-center justify-between gap-2">
@@ -1182,10 +1266,14 @@ const probes: Probe[] = useMemo(() => {
                             {action.expectedImpact}
                           </Badge>
                         </div>
+                        {action.metric ? (
+                          <div className="text-xs text-muted-foreground">
+                            Metric: {action.metric}
+                          </div>
+                        ) : null}
                         {action.evidence?.length ? (
                           <div className="text-xs text-muted-foreground mt-1">
-                            Recommended because your last mocks showed:{" "}
-                            {action.evidence.slice(0, 2).join(", ")}.
+                            Evidence: {action.evidence.slice(0, 2).join(", ")}.
                           </div>
                         ) : null}
                       </div>
@@ -1194,108 +1282,92 @@ const probes: Probe[] = useMemo(() => {
                 )}
               </Card>
 
-              <Card className="p-5 rounded-2xl space-y-2">
-                <div className="text-sm text-muted-foreground">Next mock readiness</div>
-                <div className="text-3xl font-bold">{confidenceScore}</div>
-                <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>{confidenceLabel} confidence</span>
-                  <span>Next mock: {nextMockDateLabel}</span>
-                </div>
-                <Progress value={confidenceScore} />
-              </Card>
-            </div>
-
-            <div className="text-sm text-muted-foreground">
-              <span className="font-medium text-slate-900">Why it matters:</span>{" "}
-              {whyItMatters}
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card className="p-5 rounded-2xl space-y-2">
-                <div className="text-sm text-muted-foreground">Story mode</div>
-                <div className="text-lg font-semibold">Your next 7 days</div>
-                <div className="text-sm text-muted-foreground">{storyLine}</div>
-                <div className="text-xs text-muted-foreground">
-                  Next mock target: {nextMockDateLabel}
-                </div>
-              </Card>
-
-              <Card className="p-5 rounded-2xl space-y-2">
-                <div className="text-sm text-muted-foreground">Learning engine update</div>
-                <div className="text-lg font-semibold">What the engine learned</div>
-                <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-                  {learningUpdateLines.map((line, idx) => (
-                    <li key={idx}>{line}</li>
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="text-lg font-semibold">Error hotspots</div>
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  {errorTaxonomy.slice(0, 4).map((item) => (
+                    <div key={item.key}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-900">{item.label}</span>
+                        <span>{item.value}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div
+                          className="h-full bg-slate-900/70"
+                          style={{ width: `${item.value}%` }}
+                        />
+                      </div>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </Card>
-            </div>
+            </section>
 
-            <Card className="p-5 space-y-3 rounded-2xl">
-  <div className="text-lg font-semibold">Snapshot</div>
-  <div className="text-sm">{r?.summary}</div>
-</Card>
-
-<Card className="p-5 rounded-2xl space-y-3">
-  <div className="flex items-center justify-between">
-    <div className="text-3xl font-bold">{strategyMeta.score}</div>
-
-    {strategyMeta.missing?.length ? (
-      <Badge variant="secondary" className="rounded-full">
-        {strategyMeta.missing.length} missing signals
-      </Badge>
-    ) : (
-      <Badge
-        variant={strategyMeta.score < 70 ? "destructive" : "secondary"}
-        className="rounded-full"
-      >
-        {strategyMeta.score < 70 ? "Low confidence" : "Signals complete"}
-      </Badge>
-    )}
-  </div>
-
-  <Progress value={strategyMeta.score} />
-
-  {strategyMeta.assumptions?.length ? (
-    <div className="text-sm">
-      <div className="font-medium mb-1">Assumptions used</div>
-      <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-        {strategyMeta.assumptions.slice(0, 6).map((a: string, i: number) => (
-          <li key={i}>{a}</li>
-        ))}
-      </ul>
-    </div>
-  ) : null}
-</Card>
-
-
-            <Card className="p-5 rounded-2xl space-y-3">
-              <div className="text-lg font-semibold">Top insights</div>
-              <div className="space-y-3">
-                {(r?.weaknesses || []).slice(0, 3).map((w: any, i: number) => (
-                  <div key={i} className="rounded-xl border p-4 bg-white">
-                    <div className="flex items-center justify-between">
-                      <div className="font-medium">{w.topic}</div>
-                      <Badge variant="secondary">Severity {w.severity}/5</Badge>
+            <section className="grid gap-4 lg:grid-cols-2">
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="text-lg font-semibold">Top insights</div>
+                <div className="space-y-3">
+                  {(r?.weaknesses || []).slice(0, 2).map((w: any, i: number) => (
+                    <div key={i} className="rounded-xl border p-4 bg-white">
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium">{w.topic}</div>
+                        <Badge variant="secondary">Severity {w.severity}/5</Badge>
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {w.reason}
+                      </div>
                     </div>
-                    <div className="text-sm text-muted-foreground mt-1">
-                      {w.reason}
+                  ))}
+                  {(r?.weaknesses || []).length === 0 ? (
+                    <div className="text-sm text-muted-foreground">
+                      No weak spots detected yet. Upload more mock data for sharper insights.
                     </div>
-                  </div>
-                ))}
-                {(r?.weaknesses || []).length === 0 ? (
-                  <div className="text-sm text-muted-foreground">
-                    No weak spots detected yet. Upload more mock data for sharper insights.
-                  </div>
-                ) : null}
-              </div>
-            </Card>
+                  ) : null}
+                </div>
+              </Card>
 
-            <ExamPatternChecklist
-              exam={data.exam}
-              title="Exam pattern checklist"
-              subtitle="Advice is aligned to the official format, timing, and marking."
-            />
+              <Card className="p-5 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">Signal coverage</div>
+                  {strategyMeta.missing?.length ? (
+                    <Badge variant="secondary" className="rounded-full">
+                      {strategyMeta.missing.length} missing signals
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant={strategyMeta.score < 70 ? "destructive" : "secondary"}
+                      className="rounded-full"
+                    >
+                      {strategyMeta.score < 70 ? "Low confidence" : "Signals complete"}
+                    </Badge>
+                  )}
+                </div>
+                <div className="text-3xl font-bold">{strategyMeta.score}</div>
+                <Progress value={strategyMeta.score} />
+                <div className="text-xs text-muted-foreground">
+                  {strategyMeta.assumptions?.length
+                    ? strategyMeta.assumptions.slice(0, 2).join(" • ")
+                    : "Add more mocks to improve strategy confidence."}
+                </div>
+              </Card>
+            </section>
+
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="context">
+                <AccordionTrigger>Show report context</AccordionTrigger>
+                <AccordionContent className="space-y-4">
+                  <Card className="p-5 space-y-3 rounded-2xl">
+                    <div className="text-lg font-semibold">Snapshot</div>
+                    <div className="text-sm">{r?.summary}</div>
+                  </Card>
+                  <ExamPatternChecklist
+                    exam={data.exam}
+                    title="Exam pattern checklist"
+                    subtitle="Advice is aligned to the official format, timing, and marking."
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </TabsContent>
 
           {/* ACTIONS */}
@@ -1887,15 +1959,6 @@ const probes: Probe[] = useMemo(() => {
   </div>
 </TabsContent>
 </Tabs>
-
-<NextBestActionRail
-  actions={nextActions}
-  loading={nextActionsLoading}
-  title="Next best action"
-  emptyMessage="Analyze another mock to unlock your next best action."
-  ctaLabel="Jump to Actions"
-  onCtaClick={() => setTabValue("actions")}
-/>
 
 </div>
 </div>
