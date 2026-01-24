@@ -33,10 +33,16 @@ export function NextBestActionRail({ actions, sticky, className }: NextBestActio
   const topActions = React.useMemo(() => actions.slice(0, 3), [actions]);
   const activeAction = topActions.find((action) => action.id === activeActionId);
   const shareAction = topActions.find((action) => action.id === shareActionId);
+  const isGeneratePlanAction = React.useCallback(
+    (action: NextBestAction) =>
+      action.id === "action-generate-plan" || action.title.toLowerCase().includes("generate plan"),
+    [],
+  );
 
   const isLocked = React.useCallback(
-    (action: NextBestAction) => Boolean(action.locked || paywall.lockedActionIds.includes(action.id)),
-    [paywall.lockedActionIds],
+    (action: NextBestAction) =>
+      !isGeneratePlanAction(action) && Boolean(action.locked || paywall.lockedActionIds.includes(action.id)),
+    [isGeneratePlanAction, paywall.lockedActionIds],
   );
 
   const handleToggle = (action: NextBestAction) => {
