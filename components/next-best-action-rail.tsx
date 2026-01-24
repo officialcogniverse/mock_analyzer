@@ -3,16 +3,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-
-type NextAction = {
-  id: string;
-  title: string;
-  steps?: string[];
-  metric?: string;
-  expectedImpact?: "High" | "Medium" | "Low";
-  effort?: string;
-  evidence?: string[];
-};
+import type { NextAction } from "@/lib/types";
 
 type NextBestActionRailProps = {
   actions: NextAction[];

@@ -1,4 +1,5 @@
 export type { Exam } from "./exams";
+export type { Insight, NextAction, Report } from "./schema";
 
 /**
  * Core intake (always asked)

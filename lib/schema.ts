@@ -54,3 +54,56 @@ export const ReportSchema = z.object({
 });
 
 export type Report = z.infer<typeof ReportSchema>;
+
+export const InsightSchema = z.object({
+  trend: z.string().optional(),
+  dominant_error: z.string().optional(),
+  consistency: z.string().optional(),
+  volatility: z.number().optional(),
+  risk_zone: z.string().optional(),
+  personas: z.array(z.string()).optional(),
+  learning_curve: z
+    .array(
+      z.object({
+        index: z.number().optional(),
+        xp: z.number().optional(),
+        date: z.string().nullable().optional(),
+      })
+    )
+    .optional(),
+  learning_behavior: z
+    .object({
+      cadence: z.string().optional(),
+      streak_days: z.number().optional(),
+      weekly_activity: z.number().optional(),
+      responsiveness: z.string().optional(),
+      delta_xp: z.number().optional(),
+      stuck_loop: z
+        .object({
+          active: z.boolean().optional(),
+          topic: z.string().nullable().optional(),
+        })
+        .optional(),
+      execution_style: z.string().optional(),
+      confidence: z.string().optional(),
+      evidence: z.array(z.string()).optional(),
+    })
+    .optional(),
+});
+
+export type Insight = z.infer<typeof InsightSchema>;
+
+export const NextActionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  steps: z.array(z.string()).optional(),
+  metric: z.string().optional(),
+  expectedImpact: z.enum(["High", "Medium", "Low"]).optional(),
+  effort: z.string().optional(),
+  evidence: z.array(z.string()).optional(),
+  why: z.string().optional(),
+  duration: z.string().optional(),
+  difficulty: z.enum(["Easy", "Medium", "Hard"]).optional(),
+});
+
+export type NextAction = z.infer<typeof NextActionSchema>;
