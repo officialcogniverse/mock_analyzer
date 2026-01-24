@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -56,9 +56,31 @@ export default function HomePage() {
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [lastGeneratedAttemptId, setLastGeneratedAttemptId] = useState<string | null>(null);
 
   const weeklyHours = useMemo(() => weeklyHoursFromMinutes(dailyMinutes), [dailyMinutes]);
   const canSubmit = useMemo(() => text.trim().length > 20 || files.length > 0, [text, files]);
+
+  useEffect(() => {
+    try {
+      const stored = window.sessionStorage.getItem("lastGeneratedAttemptId");
+      if (stored) setLastGeneratedAttemptId(stored);
+    } catch {
+      // noop in non-browser environments
+    }
+  }, []);
+
+  function openAttempt(attemptId: string) {
+    try {
+      if (attemptId === lastGeneratedAttemptId) {
+        window.sessionStorage.removeItem("lastGeneratedAttemptId");
+        setLastGeneratedAttemptId(null);
+      }
+    } catch {
+      // ignore storage failures
+    }
+    router.push(`/attempt/${attemptId}`);
+  }
 
   async function handleSubmit() {
     if (!canSubmit) {
@@ -99,12 +121,19 @@ export default function HomePage() {
         throw new Error(json && "error" in json ? (json as any).error : "Failed to analyze attempt.");
       }
 
-      const attemptId = json?.attempt?.id || json?.id;
+      const attemptId =
+        json?.attemptId || json?.id || json?.bundle?.attempt?.id || json?.attempt?.id;
       if (!attemptId) {
         throw new Error("Report generated but attempt id was missing.");
       }
 
       toast.success("Report ready. Focus on your next actions.");
+      setLastGeneratedAttemptId(attemptId);
+      try {
+        window.sessionStorage.setItem("lastGeneratedAttemptId", attemptId);
+      } catch {
+        // ignore storage failures
+      }
       await refreshAttempts();
       router.push(`/attempt/${attemptId}`);
     } catch (err: any) {
@@ -241,20 +270,57 @@ export default function HomePage() {
             description="Every attempt should lead to a report and a checklist. Jump back into the loop."
           />
 
+          {lastGeneratedAttemptId ? (
+            <Card className="rounded-2xl border-slate-900 bg-slate-900 p-4 text-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Latest report ready</p>
+                  <p className="text-xs text-slate-200">
+                    Attempt ID · {lastGeneratedAttemptId}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="border-white/20 bg-white text-slate-900 hover:bg-white/90"
+                  onClick={() => openAttempt(lastGeneratedAttemptId)}
+                >
+                  Open report
+                </Button>
+              </div>
+            </Card>
+          ) : null}
+
           {attemptsLoading ? (
             <LoadingState lines={6} />
           ) : attempts.length ? (
             <div className="space-y-3">
               {attempts.map((attempt) => (
-                <Card key={attempt.id} className="rounded-2xl border bg-white p-4">
+                <Card
+                  key={attempt.id}
+                  className={`rounded-2xl border bg-white p-4 transition ${
+                    attempt.id === lastGeneratedAttemptId
+                      ? "border-slate-900 ring-2 ring-slate-900/10"
+                      : "hover:border-slate-300"
+                  }`}
+                >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">Attempt {attempt.id.slice(-6)}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-900">
+                          Attempt {attempt.id.slice(-6)}
+                        </p>
+                        {attempt.id === lastGeneratedAttemptId ? (
+                          <Badge className="rounded-full bg-slate-900 text-white hover:bg-slate-900">
+                            New
+                          </Badge>
+                        ) : null}
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         {new Date(attempt.createdAt || attempt.created_at).toLocaleString()} · {attempt.sourceType || attempt.source_type}
                       </p>
                     </div>
-                    <Button type="button" variant="outline" onClick={() => router.push(`/attempt/${attempt.id}`)}>
+                    <Button type="button" variant="outline" onClick={() => openAttempt(attempt.id)}>
                       Open report
                     </Button>
                   </div>

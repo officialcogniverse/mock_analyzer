@@ -238,20 +238,39 @@ export async function POST(req: Request) {
       }
       intake = parsedIntake.data as Intake;
 
-      const file = form.get("file") as File | null;
+      const legacyFile = form.get("file");
       const imageFiles = form.getAll("images") as File[];
+      const uploadedFiles = form.getAll("files") as File[];
+      const allFiles = [
+        ...(legacyFile instanceof File ? [legacyFile] : []),
+        ...uploadedFiles,
+        ...imageFiles,
+      ];
 
-      if (file) {
-        const buf = Buffer.from(await file.arrayBuffer());
-        text = await extractTextFromPdf(buf);
-      } else if (imageFiles?.length) {
+      if (allFiles.length) {
+        const pdfFiles = allFiles.filter((file) => file.type === "application/pdf");
         const imagePayload = await Promise.all(
-          imageFiles.map(async (file) => ({
-            mime: file.type || "image/png",
-            data: Buffer.from(await file.arrayBuffer()),
-          }))
+          allFiles
+            .filter((file) => file.type !== "application/pdf")
+            .map(async (file) => ({
+              mime: file.type || "image/png",
+              data: Buffer.from(await file.arrayBuffer()),
+            }))
         );
-        text = await extractTextFromImages(imagePayload);
+
+        const pdfText = (
+          await Promise.all(
+            pdfFiles.map(async (file) => {
+              const buf = Buffer.from(await file.arrayBuffer());
+              return extractTextFromPdf(buf);
+            })
+          )
+        )
+          .filter(Boolean)
+          .join("\n\n");
+
+        const imageText = imagePayload.length ? await extractTextFromImages(imagePayload) : "";
+        text = [pdfText, imageText].filter(Boolean).join("\n\n").trim();
       }
 
       const manualRaw = form.get("manual");
@@ -466,7 +485,12 @@ export async function POST(req: Request) {
       ? buildAttemptBundle({ doc: savedAttempt, fallbackUserId: session.userId, user })
       : null;
 
-    const res = NextResponse.json({ attemptId, bundle });
+    const res = NextResponse.json({
+      id: attemptId,
+      attemptId,
+      attempt: bundle?.attempt ?? null,
+      bundle,
+    });
     if (session.isNew) attachSessionCookie(res, session);
     return res;
   } catch (err: any) {
