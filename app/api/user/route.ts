@@ -47,6 +47,19 @@ export async function POST(req: Request) {
     patch["coach.style"] = String(body.coach.style || "bullets");
   }
 
+  if (body.profile?.preferredMockDay !== undefined) {
+    patch["profile.preferredMockDay"] = String(body.profile.preferredMockDay || "").trim() || null;
+  }
+  if (body.profile?.examAttempt !== undefined) {
+    patch["profile.examAttempt"] = String(body.profile.examAttempt || "").trim() || null;
+  }
+  if (body.profile?.focusArea !== undefined) {
+    patch["profile.focusArea"] = String(body.profile.focusArea || "").trim() || null;
+  }
+  if (body.profile?.studyGroup !== undefined) {
+    patch["profile.studyGroup"] = String(body.profile.studyGroup || "").trim() || null;
+  }
+
   const user = await updateUser(session.userId, patch);
 
   const res = NextResponse.json({ user });

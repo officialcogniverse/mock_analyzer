@@ -10,6 +10,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { EXAMS, type Exam } from "@/lib/exams";
 import { ensureSession } from "@/lib/userClient";
 import { NextBestActionRail } from "@/components/next-best-action-rail";
@@ -38,6 +45,18 @@ type ActivityItem = {
   detail: string;
   timestamp: string;
   tag: string;
+};
+
+type UserDoc = {
+  _id: string;
+  displayName: string | null;
+  examDefault: string | null;
+  profile?: {
+    preferredMockDay?: string | null;
+    examAttempt?: string | null;
+    focusArea?: string | null;
+    studyGroup?: string | null;
+  };
 };
 
 const ACTIVITY_FEED: ActivityItem[] = [
@@ -75,6 +94,16 @@ export default function LandingPage() {
   const router = useRouter();
 
   const [sessionReady, setSessionReady] = useState(false);
+  const [user, setUser] = useState<UserDoc | null>(null);
+  const [profileName, setProfileName] = useState("");
+  const [preferredMockDay, setPreferredMockDay] = useState("");
+  const [examAttempt, setExamAttempt] = useState("");
+  const [focusArea, setFocusArea] = useState("");
+  const [studyGroup, setStudyGroup] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
+  const [signInName, setSignInName] = useState("");
+  const [signInExam, setSignInExam] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -90,6 +119,32 @@ export default function LandingPage() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!sessionReady) return;
+    let active = true;
+    fetch("/api/user")
+      .then((res) => res.json())
+      .then((json) => {
+        if (!active) return;
+        const u = json?.user as UserDoc | null;
+        setUser(u || null);
+        setProfileName(u?.displayName || "");
+        setPreferredMockDay(u?.profile?.preferredMockDay || "");
+        setExamAttempt(u?.profile?.examAttempt || "");
+        setFocusArea(u?.profile?.focusArea || "");
+        setStudyGroup(u?.profile?.studyGroup || "");
+        setSignInName(u?.displayName || "");
+        setSignInExam(u?.examDefault || "");
+      })
+      .catch(() => {
+        if (active) setUser(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [sessionReady]);
 
   const [step, setStep] = useState(1);
 
@@ -112,6 +167,9 @@ export default function LandingPage() {
 
   const progress = useMemo(() => (step / 2) * 100, [step]);
 
+  const displayName = user?.displayName || profileName || "Cogniverse Student";
+  const examDefault = user?.examDefault || signInExam;
+
   const canGoNext = useMemo(() => {
     if (step === 1) return !!exam && !!goal && !!struggle;
     if (step === 2) return true;
@@ -123,6 +181,66 @@ export default function LandingPage() {
   }, [exam, goal, struggle, text, file]);
 
   const choiceBtn = (active: boolean) => (active ? "default" : "outline");
+
+  async function saveProfile() {
+    if (!sessionReady) {
+      toast.error("Session not ready. Please refresh once.");
+      return;
+    }
+    setProfileSaving(true);
+    try {
+      const res = await fetch("/api/user", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: profileName,
+          profile: {
+            preferredMockDay,
+            examAttempt,
+            focusArea,
+            studyGroup,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to save profile");
+      setUser(data.user || null);
+      toast.success("Profile saved ✅");
+    } catch (error: any) {
+      toast.error(error?.message || "Profile save failed");
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function signIn() {
+    if (!sessionReady) {
+      toast.error("Session not ready. Please refresh once.");
+      return;
+    }
+    setProfileSaving(true);
+    try {
+      const res = await fetch("/api/user", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          displayName: signInName,
+          examDefault: signInExam,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Sign-in failed");
+      setUser(data.user || null);
+      setProfileName(data.user?.displayName || "");
+      setSignInOpen(false);
+      toast.success("Welcome back ✅");
+      router.push("/history");
+    } catch (error: any) {
+      toast.error(error?.message || "Sign-in failed");
+    } finally {
+      setProfileSaving(false);
+    }
+  }
 
   async function onAnalyze() {
     if (!canAnalyze || !exam || !goal || !struggle) return;
@@ -207,7 +325,45 @@ export default function LandingPage() {
               </Button>
               <Button variant="ghost">Programs</Button>
               <Button variant="ghost">Support</Button>
-              <Button variant="outline">Sign in</Button>
+              <Dialog open={signInOpen} onOpenChange={setSignInOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">Sign in</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Sign in to your portal</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">Your name</div>
+                      <Input
+                        value={signInName}
+                        onChange={(e) => setSignInName(e.target.value)}
+                        placeholder="e.g., Cogniverse Student"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">Default exam</div>
+                      <Input
+                        value={signInExam}
+                        onChange={(e) => setSignInExam(e.target.value)}
+                        placeholder="CAT / JEE / NEET"
+                      />
+                    </div>
+                    <Button
+                      className="w-full"
+                      onClick={signIn}
+                      disabled={profileSaving}
+                      type="button"
+                    >
+                      {profileSaving ? "Signing in..." : "Continue to dashboard"}
+                    </Button>
+                    <div className="text-xs text-muted-foreground">
+                      This creates a local session so your profile and mocks stay connected.
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           </nav>
 
@@ -329,12 +485,17 @@ export default function LandingPage() {
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 text-lg font-semibold text-indigo-700">
-                    CS
+                    {displayName
+                      .split(" ")
+                      .map((part) => part[0])
+                      .slice(0, 2)
+                      .join("")
+                      .toUpperCase()}
                   </div>
                   <div>
-                    <p className="text-lg font-semibold">Cogniverse Student</p>
+                    <p className="text-lg font-semibold">{displayName}</p>
                     <p className="text-sm text-muted-foreground">
-                      CAT 2024 · Target percentile 95+
+                      {examDefault ? `${examDefault} · ` : ""}Target percentile 95+
                     </p>
                   </div>
                 </div>
@@ -355,31 +516,62 @@ export default function LandingPage() {
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-muted-foreground">
+                        Student name
+                      </label>
+                      <Input
+                        value={profileName}
+                        onChange={(e) => setProfileName(e.target.value)}
+                        placeholder="Cogniverse Student"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">
                         Preferred mock day
                       </label>
-                      <Input placeholder="Saturday" />
+                      <Input
+                        value={preferredMockDay}
+                        onChange={(e) => setPreferredMockDay(e.target.value)}
+                        placeholder="Saturday"
+                      />
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-muted-foreground">
                         Exam attempt
                       </label>
-                      <Input placeholder="1st attempt" />
+                      <Input
+                        value={examAttempt}
+                        onChange={(e) => setExamAttempt(e.target.value)}
+                        placeholder="1st attempt"
+                      />
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-muted-foreground">
                         Focus area
                       </label>
-                      <Input placeholder="VARC accuracy" />
+                      <Input
+                        value={focusArea}
+                        onChange={(e) => setFocusArea(e.target.value)}
+                        placeholder="VARC accuracy"
+                      />
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-muted-foreground">
                         Study group
                       </label>
-                      <Input placeholder="Cogniverse Cohort A" />
+                      <Input
+                        value={studyGroup}
+                        onChange={(e) => setStudyGroup(e.target.value)}
+                        placeholder="Cogniverse Cohort A"
+                      />
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary">Save profile</Button>
+                    <Button variant="secondary" onClick={saveProfile} disabled={profileSaving}>
+                      {profileSaving ? "Saving..." : "Save profile"}
+                    </Button>
+                    <Button variant="outline" onClick={() => router.push("/history")}>
+                      Go to dashboard
+                    </Button>
                     <Button variant="outline">Request coach review</Button>
                   </div>
                 </div>
@@ -395,7 +587,7 @@ export default function LandingPage() {
                       Every mock, drill, and review gets logged automatically.
                     </p>
                   </div>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" onClick={() => router.push("/history")}>
                     View full log
                   </Button>
                 </div>

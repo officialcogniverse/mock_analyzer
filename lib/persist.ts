@@ -96,6 +96,12 @@ export async function upsertUser(userId: string) {
           tone: "calm",
           style: "bullets",
         } satisfies CoachPersona,
+        profile: {
+          preferredMockDay: null,
+          examAttempt: null,
+          focusArea: null,
+          studyGroup: null,
+        },
       },
       $set: { lastSeenAt: new Date() },
     },
