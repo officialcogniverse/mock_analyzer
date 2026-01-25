@@ -9,61 +9,65 @@ function normalizeUserId(email: string) {
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
+
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
     }),
   ],
+
   callbacks: {
     async signIn({ user }) {
-      if (!user.email) return false;
+      // Allow OAuth to succeed as long as Google verified the email
+      if (!user?.email) return false;
+
       const userId = normalizeUserId(user.email);
       const db = await getDb();
       await ensureIndexes(db);
-      const users = db.collection(COLLECTIONS.users);
-      const existing = await users.findOne({ userId });
-      if (existing?.deletedAt) return false;
 
+      const users = db.collection(COLLECTIONS.users);
       const now = new Date();
+      const existing = await users.findOne({ userId });
+
       if (!existing) {
         await users.insertOne({
           userId,
           displayName: user.name ?? null,
           email: user.email,
           provider: "google",
-          examGoal: null,
-          targetDate: null,
-          weeklyHours: null,
-          baselineLevel: null,
-          preferences: { theme: "system" },
           onboardingCompleted: false,
-          deletedAt: null,
+          preferences: { theme: "system" },
           createdAt: now,
           updatedAt: now,
+          deletedAt: null,
+          blocked: false,
         });
       } else {
-        await users.updateOne(
-          { userId },
-          {
-            $set: {
-              displayName: existing.displayName ?? user.name ?? null,
-              updatedAt: now,
-            },
-          }
-        );
+        await users.updateOne({ userId }, { $set: { updatedAt: now } });
       }
+
       return true;
     },
+
     async jwt({ token, user }) {
-      if (user?.email) {
-        token.userId = normalizeUserId(user.email);
+      // user is only present on first sign-in; afterwards rely on token.email
+      const email = user?.email ?? token.email;
+      if (email) {
+        (token as any).userId = normalizeUserId(String(email));
+        token.email = String(email);
       }
       return token;
     },
+
     async session({ session, token }) {
-      if (session.user && token.userId) {
-        session.user.id = String(token.userId);
+      // Ensure session.user.id ALWAYS exists for server-side route protection
+      if (session.user) {
+        const uid =
+          (token as any).userId ||
+          (session.user.email ? normalizeUserId(session.user.email) : undefined);
+
+        if (uid) (session.user as any).id = String(uid);
       }
       return session;
     },

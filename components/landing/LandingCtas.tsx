@@ -15,7 +15,10 @@ export function LandingCtas() {
           <Link href="/app">Get started</Link>
         </Button>
       ) : (
-        <Button onClick={() => signIn("google", { callbackUrl: "/app" })}>
+        <Button
+          type="button"
+          onClick={() => signIn("google", { callbackUrl: "/app" })}
+        >
           Get started
         </Button>
       )}
