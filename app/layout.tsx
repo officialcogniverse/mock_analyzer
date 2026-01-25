@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { SiteHeader } from "@/components/navigation/SiteHeader";
-import { ChatWidget } from "@/components/chat/ChatWidget";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,7 +20,6 @@ export default function RootLayout({
         <ThemeProvider>
           <SiteHeader />
           {children}
-          <ChatWidget />
         </ThemeProvider>
       </body>
     </html>
