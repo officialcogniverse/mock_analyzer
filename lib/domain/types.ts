@@ -143,7 +143,7 @@ export interface TrustBreakdown {
 
 export interface PaywallState {
   isPremium: boolean;
-  lockedActionIds: string[];
+  lockedActionIds: readonly string[];
   lockedPlan: boolean;
   lockedReasoning: boolean;
   lockedProgress: boolean;

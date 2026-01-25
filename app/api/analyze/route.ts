@@ -45,7 +45,12 @@ export async function POST(req: Request) {
   }
 
   const form = await req.formData();
-  const file = form.get("file");
+  const fileEntry = form.get("file");
+  const filesEntry = form.getAll("files");
+  const file =
+    fileEntry instanceof File
+      ? fileEntry
+      : filesEntry.find((entry): entry is File => entry instanceof File) ?? null;
   const textInput = form.get("text")?.toString() ?? "";
 
   let rawText = "";
@@ -55,7 +60,7 @@ export async function POST(req: Request) {
   const missingFromInput: string[] = [];
   let extractionNotes: string | undefined;
 
-  if (file && file instanceof File) {
+  if (file) {
     if (file.size > MAX_FILE_SIZE_BYTES) {
       return NextResponse.json(
         fail("FILE_TOO_LARGE", "File exceeds 8MB limit."),
@@ -94,6 +99,17 @@ export async function POST(req: Request) {
   }
 
   rawText = rawText.trim();
+  if (!rawText) {
+    return NextResponse.json(
+      fail(
+        "EMPTY_INPUT",
+        sourceType === "image"
+          ? "We couldn’t read that image. Please upload a PDF or paste the text."
+          : "We couldn’t read that input. Please upload a PDF or paste the text."
+      ),
+      { status: 400 }
+    );
+  }
   textChars = rawText.length;
   const normalizedRawText = rawText.slice(0, MAX_RAWTEXT_LENGTH);
 
@@ -169,6 +185,8 @@ export async function POST(req: Request) {
 
   return NextResponse.json(
     ok({
+      id: attemptResult.insertedId.toString(),
+      recommendationId: recommendationResult.insertedId.toString(),
       attempt: { ...attemptDoc, _id: attemptResult.insertedId.toString() },
       recommendation: {
         ...recommendationDoc,

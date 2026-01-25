@@ -1,4 +1,4 @@
-import type { EventName } from "@/lib/events";
+import type { EventName } from "@/lib/schemas/event";
 import { fetchWithTimeout } from "@/lib/fetcher";
 
 type TrackEventParams = {

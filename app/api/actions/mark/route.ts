@@ -57,9 +57,11 @@ export async function POST(req: Request) {
     fireAndForgetEvent({
       userId: session.userId,
       payload: {
-        event_name: "action_completed",
-        attempt_id: parsed.data.attemptId,
-        metadata: { actionId: parsed.data.actionId, title: parsed.data.title },
+        eventName: "mark_action_done",
+        payload: {
+          attempt_id: parsed.data.attemptId,
+          metadata: { actionId: parsed.data.actionId, title: parsed.data.title },
+        },
       },
     });
   }

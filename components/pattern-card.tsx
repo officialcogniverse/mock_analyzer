@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { ReportPattern } from "@/lib/domain/types";
+import type { ReportPattern } from "@/lib/domain/schemas";
 
 function severityLabel(severity: number) {
   if (severity >= 4) return { label: "High risk", tone: "destructive" as const };

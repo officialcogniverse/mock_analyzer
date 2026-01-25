@@ -133,8 +133,8 @@ export async function POST(req: Request) {
   fireAndForgetEvent({
     userId: newUserId,
     payload: {
-      event_name: "login_success",
-      metadata: { mode, instituteId: instituteId ?? null, role },
+      eventName: "login_success",
+      payload: { mode, instituteId: instituteId ?? null, role },
     },
   });
 
