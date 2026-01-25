@@ -69,10 +69,26 @@ export const PlanSchema = z.object({
   days: z.array(PlanDaySchema),
 });
 
+export const ProbeSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  durationMin: z.number().int().min(5).max(180),
+  instructions: z.string().min(1),
+  successCheck: z.string().min(1),
+});
+
+export const NextMockStrategySchema = z.object({
+  rules: z.array(z.string().min(1)),
+  timeCheckpoints: z.array(z.string().min(1)),
+  skipPolicy: z.array(z.string().min(1)),
+});
+
 export const RecommendationBundleSchema = z.object({
   insights: InsightBundleSchema,
   nbas: z.array(NBAActionSchema).min(1),
   plan: PlanSchema,
+  probes: z.array(ProbeSchema).min(1),
+  nextMockStrategy: NextMockStrategySchema,
   strategy: z.object({
     id: z.string().min(1),
     exam: z.string().min(1),
@@ -91,5 +107,7 @@ export type NormalizedAttempt = z.infer<typeof NormalizedAttemptSchema>;
 export type InsightBundle = z.infer<typeof InsightBundleSchema>;
 export type NBAAction = z.infer<typeof NBAActionSchema>;
 export type Plan = z.infer<typeof PlanSchema>;
+export type Probe = z.infer<typeof ProbeSchema>;
+export type NextMockStrategy = z.infer<typeof NextMockStrategySchema>;
 export type RecommendationBundle = z.infer<typeof RecommendationBundleSchema>;
 export type ProgressEventInput = z.infer<typeof ProgressEventSchema>;
