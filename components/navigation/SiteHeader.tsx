@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { signIn, signOut, useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
 import { Moon, Sun } from "lucide-react";
 
@@ -61,9 +61,14 @@ export function SiteHeader() {
               </Button>
             </>
           ) : (
-            <Link href="/about" className="text-muted-foreground hover:text-foreground">
-              About
-            </Link>
+            <>
+              <Link href="/about" className="text-muted-foreground hover:text-foreground">
+                About
+              </Link>
+              <Link href="/login" className="text-muted-foreground hover:text-foreground">
+                Login
+              </Link>
+            </>
           )}
 
           {/* Theme toggle always visible */}
@@ -77,8 +82,8 @@ export function SiteHeader() {
               Sign out
             </Button>
           ) : (
-            <Button type="button" onClick={() => signIn("google", { callbackUrl: "/app" })}>
-              Sign in
+            <Button asChild type="button">
+              <Link href="/login">Sign in</Link>
             </Button>
           )}
         </nav>
