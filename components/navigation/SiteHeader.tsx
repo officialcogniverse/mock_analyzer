@@ -9,7 +9,10 @@ import { Button } from "@/components/ui/button";
 
 export function SiteHeader() {
   const { data: session, status } = useSession();
-  const authed = status === "authenticated";
+  const userId =
+    session?.user?.id ??
+    (session?.user?.email ? session.user.email.trim().toLowerCase() : undefined);
+  const authed = Boolean(userId);
 
   const { theme, setTheme } = useTheme();
   const toggleTheme = () => {
@@ -69,7 +72,7 @@ export function SiteHeader() {
           </Button>
 
           {/* Auth button */}
-          {status === "loading" ? null : session ? (
+          {status === "loading" ? null : authed ? (
             <Button type="button" variant="outline" onClick={() => signOut({ callbackUrl: "/" })}>
               Sign out
             </Button>

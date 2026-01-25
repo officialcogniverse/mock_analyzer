@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 
-import { authOptions } from "@/lib/auth";
+import { authOptions, getSessionUserId } from "@/lib/auth";
 import { ok, fail } from "@/lib/api/errors";
 import { getDb } from "@/lib/mongodb";
 import { COLLECTIONS, ensureIndexes } from "@/lib/db";
@@ -11,10 +11,10 @@ export const runtime = "nodejs";
 
 export async function POST() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const userId = getSessionUserId(session);
+  if (!userId) {
     return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
   }
-  const userId = session.user.id;
   const activeUser = await assertActiveUser(userId);
   if (!activeUser) {
     return NextResponse.json(fail("NOT_FOUND", "Account not found."), { status: 404 });
