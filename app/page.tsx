@@ -1,6 +1,4 @@
-import Link from "next/link";
-
-import { Button } from "@/components/ui/button";
+import { LandingActions } from "@/components/landing/LandingActions";
 
 export default function LandingPage() {
   return (
@@ -18,14 +16,7 @@ export default function LandingPage() {
               Upload a scorecard, review your next best actions, and follow a weekly plan built for your exam goal.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Button asChild>
-              <Link href="/app">Get started</Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/history">See progress</Link>
-            </Button>
-          </div>
+          <LandingActions />
         </div>
         <div className="surface-card space-y-4 p-6">
           <h2 className="text-xl font-semibold">What you get</h2>

@@ -8,12 +8,18 @@ export function NextBestActions({ actions }: { actions: Array<any> }) {
         <Badge variant="outline">Top priorities</Badge>
       </div>
       <div className="mt-4 space-y-4">
-        {actions?.map((action) => (
-          <div key={action.id} className="rounded-xl border border-border/60 p-4">
-            <p className="font-medium">{action.title}</p>
-            <p className="text-sm text-muted-foreground">{action.reason}</p>
+        {actions?.length ? (
+          actions.map((action) => (
+            <div key={action.id} className="rounded-xl border border-border/60 p-4">
+              <p className="font-medium">{action.title}</p>
+              <p className="text-sm text-muted-foreground">{action.reason}</p>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
+            Generate an analysis to unlock your next actions.
           </div>
-        ))}
+        )}
       </div>
     </div>
   );

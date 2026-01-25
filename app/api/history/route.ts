@@ -61,11 +61,12 @@ export async function GET() {
       analysisId: analysis?._id.toString() ?? null,
       createdAt: attempt.createdAt,
       exam: attempt.exam ?? null,
+      summary: analysis?.summary ?? null,
       uploadType: upload?.type ?? null,
       nbaTitles: analysis?.nba?.slice(0, 2).map((action: any) => action.title) ?? [],
       completion: { completed, total },
     };
   });
 
-  return NextResponse.json(ok(history));
+  return NextResponse.json(ok({ items: history }));
 }
