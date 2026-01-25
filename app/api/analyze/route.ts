@@ -1,33 +1,21 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { ObjectId } from "mongodb";
-import { z } from "zod";
-
 import { authOptions, getSessionUserId } from "@/lib/auth";
 import { ok, fail, mapZodError } from "@/lib/api/errors";
+import { AnalyzeTextSchema, RecommendationBundleSchema } from "@/lib/schemas/workflow";
 import { getDb } from "@/lib/mongodb";
 import { COLLECTIONS, ensureIndexes } from "@/lib/db";
-import { detectExamFromText } from "@/lib/examDetect";
-import { normalizeSignals, rankActions, buildPlan } from "@/lib/engine/signals";
+import { extractTextFromPdf } from "@/lib/extractText";
+import { extractTextFromImages } from "@/lib/extractTextFromImages";
+import { analyzeMock } from "@/lib/engines/mockAnalysis";
+import { buildInsights } from "@/lib/engines/insights";
+import { buildNbas } from "@/lib/engines/nba";
+import { buildPlan } from "@/lib/engines/plan";
+import { loadMemorySummary, recordStrategyUsage, selectStrategy } from "@/lib/engines/memory";
 import { assertActiveUser } from "@/lib/users";
 
-const BodySchema = z.object({
-  uploadId: z.string().min(1),
-  intake: z
-    .object({
-      examGoal: z.string().optional(),
-      weeklyHours: z.number().optional(),
-      baselineLevel: z.string().optional(),
-    })
-    .optional(),
-});
-
-function summarizeIntake(intake?: Record<string, any>) {
-  if (!intake) return "";
-  return Object.entries(intake)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join("\n");
-}
+const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
+const MAX_RAWTEXT_LENGTH = 6000;
 
 function hashText(text: string) {
   let hash = 0;
@@ -51,74 +39,150 @@ export async function POST(req: Request) {
     return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });
   }
 
-  const body = await req.json();
-  const parsed = BodySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      fail("INVALID_INPUT", "Invalid analyze payload.", mapZodError(parsed.error)),
-      { status: 400 }
-    );
+  const contentType = req.headers.get("content-type") || "";
+  if (!contentType.includes("multipart/form-data")) {
+    return NextResponse.json(fail("INVALID_REQUEST", "Expected multipart/form-data."), { status: 400 });
   }
+
+  const form = await req.formData();
+  const file = form.get("file");
+  const textInput = form.get("text")?.toString() ?? "";
+
+  let rawText = "";
+  let sourceType: "pdf" | "image" | "text" = "text";
+  let filename: string | null = null;
+  let textChars = 0;
+  const missingFromInput: string[] = [];
+  let extractionNotes: string | undefined;
+
+  if (file && file instanceof File) {
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json(
+        fail("FILE_TOO_LARGE", "File exceeds 8MB limit."),
+        { status: 400 }
+      );
+    }
+    filename = file.name;
+    const buffer = Buffer.from(await file.arrayBuffer());
+    if (file.type === "application/pdf") {
+      sourceType = "pdf";
+      rawText = await extractTextFromPdf(buffer);
+    } else if (["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      sourceType = "image";
+      rawText = await extractTextFromImages([{ mime: file.type, data: buffer }]);
+      if (!rawText) {
+        missingFromInput.push("image_ocr_not_available");
+        extractionNotes = "Image OCR is unavailable; ask user to paste text or upload PDF.";
+      }
+    } else {
+      return NextResponse.json(fail("UNSUPPORTED_FILE", "Only PDF or image uploads are supported."), {
+        status: 400,
+      });
+    }
+  } else if (textInput) {
+    const parsed = AnalyzeTextSchema.safeParse({ text: textInput });
+    if (!parsed.success) {
+      return NextResponse.json(
+        fail("INVALID_TEXT", "Invalid pasted text.", mapZodError(parsed.error)),
+        { status: 400 }
+      );
+    }
+    sourceType = "text";
+    rawText = parsed.data.text;
+  } else {
+    return NextResponse.json(fail("MISSING_INPUT", "Provide a file or paste text."), { status: 400 });
+  }
+
+  rawText = rawText.trim();
+  textChars = rawText.length;
+  const normalizedRawText = rawText.slice(0, MAX_RAWTEXT_LENGTH);
+
+  const { attempt, exam } = analyzeMock(rawText);
+  const insights = buildInsights(attempt);
+  const inferred = {
+    persona: insights.inferred.persona,
+    riskPatterns: insights.inferred.riskPatterns,
+    confidenceGap: insights.inferred.confidenceGap,
+  };
+  const missing = [...new Set([...attempt.missing, ...missingFromInput])];
 
   const db = await getDb();
   await ensureIndexes(db);
-  const uploads = db.collection(COLLECTIONS.uploads);
-  const attempts = db.collection(COLLECTIONS.attempts);
-  const analyses = db.collection(COLLECTIONS.analyses);
 
-  const upload = await uploads.findOne({
-    _id: new ObjectId(parsed.data.uploadId),
-    userId,
+  const examLabel = exam.detected ?? "agnostic";
+  const memorySummary = await loadMemorySummary(db, userId, examLabel, inferred.persona ?? "steady");
+  const strategy = selectStrategy({
+    exam: examLabel,
+    persona: inferred.persona ?? "steady",
+    avoidStrategies: memorySummary.avoidStrategies,
   });
 
-  if (!upload) {
-    return NextResponse.json(fail("NOT_FOUND", "Upload not found."), { status: 404 });
-  }
+  const nbas = buildNbas({
+    attempt: { ...attempt, inferred, missing },
+    strategy,
+  });
+  const plan = buildPlan(nbas, strategy.horizonDays);
 
-  const sourceText = upload.extractedText || summarizeIntake(parsed.data.intake ?? {}) || "";
-  const exam = detectExamFromText(sourceText) ?? activeUser.examGoal ?? "General";
+  const recommendation = RecommendationBundleSchema.parse({
+    insights: { ...insights, inferred, missing },
+    nbas,
+    plan,
+    strategy: { id: strategy.id, exam: strategy.exam, persona: strategy.persona },
+  });
+
+  const attempts = db.collection(COLLECTIONS.attempts);
+  const recommendations = db.collection(COLLECTIONS.recommendations);
+
   const attemptDoc = {
     userId,
-    uploadId: parsed.data.uploadId,
     createdAt: new Date(),
+    source: {
+      type: sourceType,
+      filename,
+      textChars,
+    },
     exam,
-    rawTextHash: hashText(sourceText),
+    rawText: normalizedRawText,
+    rawTextHash: hashText(rawText),
+    known: attempt.known,
+    inferred,
+    missing,
+    artifacts: {
+      extractionQuality: attempt.artifacts.extractionQuality,
+      notes: extractionNotes,
+    },
   };
   const attemptResult = await attempts.insertOne(attemptDoc);
 
-  const signals = normalizeSignals({
-    profile: {
-      examGoal: activeUser.examGoal,
-      weeklyHours: activeUser.weeklyHours,
-      baselineLevel: activeUser.baselineLevel,
-    },
-    performance: {},
-    events: {},
-    textHints: sourceText.split(/\s+/).slice(0, 24),
-  });
-
-  const nba = rankActions(signals);
-  const plan = buildPlan(signals);
-
-  const analysisDoc = {
+  const recommendationDoc = {
     userId,
     attemptId: attemptResult.insertedId.toString(),
-    uploadId: parsed.data.uploadId,
     createdAt: new Date(),
-    summary: `Plan built for ${signals.examGoal} with ${signals.paceBand} weekly capacity.`,
-    nba,
-    plan,
-    signalsUsed: signals,
-    warnings: sourceText ? [] : ["Missing extracted text; used intake summary instead."],
+    insights: recommendation.insights,
+    nbas: recommendation.nbas,
+    plan: recommendation.plan,
+    strategy: recommendation.strategy,
   };
+  const recommendationResult = await recommendations.insertOne(recommendationDoc);
 
-  const analysisResult = await analyses.insertOne(analysisDoc);
+  await recordStrategyUsage(db, userId, strategy);
 
   return NextResponse.json(
     ok({
-      attemptId: analysisDoc.attemptId,
-      analysisId: analysisResult.insertedId.toString(),
-      analysis: analysisDoc,
+      attempt: { ...attemptDoc, _id: attemptResult.insertedId.toString() },
+      recommendation: {
+        ...recommendationDoc,
+        _id: recommendationResult.insertedId.toString(),
+      },
+      progressSummary: {
+        completionRate: 0,
+        tasksDone: 0,
+        tasksTotal: recommendation.plan.days.reduce((sum, day) => sum + day.tasks.length, 0),
+        difficultCount: 0,
+        skippedCount: 0,
+        topBlockers: [],
+      },
+      recentEvents: [],
     })
   );
 }

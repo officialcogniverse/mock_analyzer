@@ -1,6 +1,6 @@
 # Cogniverse Mock Analyzer
 
-Cogniverse Mock Analyzer is a Next.js app that turns mock scorecards into deterministic next-best actions, a 7-day plan, and a checklist you can track over time.
+Cogniverse Mock Analyzer is a Next.js app that turns mock scorecards into deterministic insights, next-best actions, a 7/14-day plan, and progress tracking.
 
 ## Quick start
 
@@ -31,7 +31,7 @@ OPENAI_API_KEY=""
 
 ## Core flows
 
-- **Upload → Analyze → Actions/Plan → Checklist/Notes → History**
+- **Upload → Analyze → Insights/NBAs/Plan → Progress → History**
 - Deterministic signal aggregation (no embeddings or ML) for next-best actions and plan generation.
 
 ## Architecture
@@ -40,30 +40,23 @@ OPENAI_API_KEY=""
 flowchart TD
   User((User)) -->|Sign in| NextAuth[NextAuth Google]
   User -->|Upload PDF/Image/Text| UploadUI[UploadCard]
-  UploadUI --> UploadAPI[/api/upload]
-  UploadAPI --> MongoUploads[(uploads)]
-  UploadAPI --> Extract[PDF/OCR Extraction]
-
   UploadUI --> AnalyzeAPI[/api/analyze]
+  AnalyzeAPI --> Extract[PDF/OCR Extraction]
   AnalyzeAPI --> MongoAttempts[(attempts)]
-  AnalyzeAPI --> MongoAnalyses[(analyses)]
-  AnalyzeAPI --> Signals[Signals Aggregator]
+  AnalyzeAPI --> MongoRecs[(recommendations)]
 
   User --> Dashboard[/app Dashboard]
-  Dashboard --> ActionsAPI[/api/actions/mark-done]
-  Dashboard --> NotesAPI[/api/notes]
+  Dashboard --> ProgressAPI[/api/progress]
   Dashboard --> EventsAPI[/api/events]
   Dashboard --> NudgesAPI[/api/nudges]
 
-  ActionsAPI --> MongoActions[(actions)]
-  NotesAPI --> MongoNotes[(notes)]
+  ProgressAPI --> MongoProgress[(progress_events)]
   EventsAPI --> MongoEvents[(events)]
 
   User --> History[/history]
   History --> HistoryAPI[/api/history]
   HistoryAPI --> MongoAttempts
-  HistoryAPI --> MongoAnalyses
-  HistoryAPI --> MongoUploads
+  HistoryAPI --> MongoRecs
 
   User --> Account[/account]
   Account --> UserAPI[/api/user]

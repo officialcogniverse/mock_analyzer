@@ -1,35 +1,35 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
-import { UploadCard, type UploadResult } from "@/components/upload/UploadCard";
+import { UploadCard, type AnalyzeResult } from "@/components/upload/UploadCard";
 import { NextBestActions } from "@/components/analysis/NextBestActions";
 import { PlanPathway } from "@/components/analysis/PlanPathway";
-import { Checklist } from "@/components/analysis/Checklist";
-import { NotesPanel } from "@/components/analysis/NotesPanel";
-import { BotWidget } from "@/components/bot/BotWidget";
+import { InsightsSummary } from "@/components/analysis/InsightsSummary";
+import { ProgressTracker } from "@/components/analysis/ProgressTracker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import type { Plan, RecommendationBundle } from "@/lib/schemas/workflow";
 
 const examGoals = ["CAT", "JEE", "NEET", "UPSC", "Other"];
 
+type RecommendationState = {
+  recommendation: RecommendationBundle & { _id?: string };
+  attempt: Record<string, any>;
+  progressSummary: Record<string, any> | null;
+  recentEvents: Array<Record<string, any>>;
+};
+
 export function AppDashboard() {
-  const searchParams = useSearchParams();
   const [profile, setProfile] = React.useState<any>(null);
-  const [upload, setUpload] = React.useState<UploadResult | null>(null);
-  const [analysis, setAnalysis] = React.useState<any>(null);
-  const [analysisId, setAnalysisId] = React.useState<string | null>(null);
-  const [analysisMeta, setAnalysisMeta] = React.useState<any>(null);
-  const [nudges, setNudges] = React.useState<Array<{ id: string; message: string }>>([]);
-  const [loadingAnalyze, setLoadingAnalyze] = React.useState(false);
   const [loadingLatest, setLoadingLatest] = React.useState(true);
+  const [state, setState] = React.useState<RecommendationState | null>(null);
+  const [savingTask, setSavingTask] = React.useState<string | null>(null);
 
   const [onboarding, setOnboarding] = React.useState({
     examGoal: "CAT",
@@ -59,52 +59,20 @@ export function AppDashboard() {
 
   React.useEffect(() => {
     async function loadLatest() {
-      const targetAnalysisId = searchParams.get("analysisId");
-      const endpoint = targetAnalysisId ? `/api/analysis/${targetAnalysisId}` : "/api/analysis/latest";
-      const res = await fetch(endpoint);
+      const res = await fetch("/api/recommendations/latest");
       const json = await res.json();
-      if (json.ok) {
-        setAnalysis(json.data.analysis);
-        setAnalysisId(json.data.analysisId);
-        setAnalysisMeta({
+      if (json.ok && json.data.recommendation) {
+        setState({
+          recommendation: json.data.recommendation,
           attempt: json.data.attempt,
-          upload: json.data.upload,
+          progressSummary: json.data.progressSummary,
+          recentEvents: json.data.recentEvents ?? [],
         });
       }
       setLoadingLatest(false);
     }
     void loadLatest();
-  }, [searchParams]);
-
-  React.useEffect(() => {
-    async function loadNudges() {
-      const res = await fetch("/api/nudges");
-      const json = await res.json();
-      if (json.ok) setNudges(json.data);
-    }
-    void loadNudges();
   }, []);
-
-  const postEvent = async (eventName: string, payload?: Record<string, any>) => {
-    await fetch("/api/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventName, payload }),
-    });
-  };
-
-  React.useEffect(() => {
-    if (upload?.uploadId) {
-      void postEvent("upload_attempt", { uploadId: upload.uploadId });
-    }
-  }, [upload?.uploadId]);
-
-  React.useEffect(() => {
-    if (analysisId) {
-      void postEvent("generate_plan", { analysisId });
-      void postEvent("view_actions", { analysisId });
-    }
-  }, [analysisId]);
 
   const handleSaveOnboarding = async () => {
     const res = await fetch("/api/user", {
@@ -128,42 +96,60 @@ export function AppDashboard() {
     }
   };
 
-  const handleAnalyze = async () => {
-    if (!upload) return;
-    setLoadingAnalyze(true);
-    try {
-      void postEvent("analyze_attempt", { uploadId: upload.uploadId });
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          uploadId: upload.uploadId,
-          intake: {
-            examGoal: onboarding.examGoal,
-            weeklyHours: Number(onboarding.weeklyHours) || 0,
-            baselineLevel: onboarding.baselineLevel,
-          },
-        }),
-      });
-      const json = await res.json();
-      if (json.ok) {
-        setAnalysis(json.data.analysis);
-        setAnalysisId(json.data.analysisId);
-        setAnalysisMeta({
-          attempt: {
-            attemptId: json.data.attemptId,
-            createdAt: new Date(),
-            exam: json.data.analysis?.signalsUsed?.examGoal ?? null,
-          },
-          upload: { filename: upload.filename ?? null, extractedTextSnippet: upload.extractedTextSnippet ?? null },
-        });
-        toast.success("Analysis ready");
-      } else {
-        toast.error(json.error?.message || "Analysis failed");
-      }
-    } finally {
-      setLoadingAnalyze(false);
+  const handleAnalyzed = (result: AnalyzeResult) => {
+    setState({
+      recommendation: result.recommendation as RecommendationBundle,
+      attempt: result.attempt,
+      progressSummary: result.progressSummary ?? null,
+      recentEvents: result.recentEvents ?? [],
+    });
+  };
+
+  const updatePlanTask = (plan: Plan, taskId: string, status: string, note?: string) => ({
+    ...plan,
+    days: plan.days.map((day) => ({
+      ...day,
+      tasks: day.tasks.map((task) =>
+        task.id === taskId
+          ? { ...task, status: status as any, note: note ?? task.note }
+          : task
+      ),
+    })),
+  });
+
+  const handleTaskUpdate = async (taskId: string, status: string, note?: string) => {
+    if (!state?.recommendation?._id) return;
+    setSavingTask(taskId);
+    const res = await fetch("/api/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recommendationId: state.recommendation._id,
+        taskId,
+        status,
+        note,
+      }),
+    });
+    const json = await res.json();
+    if (json.ok) {
+      setState((prev) =>
+        prev
+          ? {
+              ...prev,
+              recommendation: {
+                ...prev.recommendation,
+                plan: updatePlanTask(prev.recommendation.plan, taskId, status, note),
+              },
+              progressSummary: json.data.progressSummary ?? prev.progressSummary,
+              recentEvents: json.data.recentEvents ?? prev.recentEvents,
+            }
+          : prev
+      );
+      toast.success("Progress updated");
+    } else {
+      toast.error(json.error?.message || "Unable to update task");
     }
+    setSavingTask(null);
   };
 
   return (
@@ -171,17 +157,11 @@ export function AppDashboard() {
       <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6">
           <div className="space-y-2">
-            <h1 className="text-3xl font-semibold">Dashboard</h1>
+            <h1 className="text-3xl font-semibold">Mock workflow</h1>
             <p className="text-sm text-muted-foreground">
-              Upload → analyze → execute. Your full mock loop is live here.
+              Upload → insights → next best actions → plan → progress.
             </p>
           </div>
-          {nudges.length > 0 ? (
-            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm">
-              <p className="font-medium">Nudge</p>
-              <p className="text-muted-foreground">{nudges[0].message}</p>
-            </div>
-          ) : null}
           {profile && !profile.onboardingCompleted ? (
             <div className="rounded-2xl border border-border bg-background p-5">
               <h2 className="text-lg font-semibold">Quick onboarding</h2>
@@ -260,34 +240,14 @@ export function AppDashboard() {
               </div>
             </div>
           ) : null}
-          <UploadCard onUploaded={setUpload} />
-          {upload ? (
-            <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-4 text-sm">
-              <p className="font-medium text-foreground">Upload ready</p>
-              <p className="text-muted-foreground">
-                {upload.extractedTextSnippet
-                  ? `“${upload.extractedTextSnippet}…”`
-                  : "Text extraction complete."}
-              </p>
-              <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={handleAnalyze} disabled={loadingAnalyze}>
-                  {loadingAnalyze ? "Analyzing..." : "Analyze"}
-                </Button>
-                {upload.extraction?.status === "needs_intake" ? (
-                  <span className="text-xs text-muted-foreground">
-                    Add intake details above for a stronger plan.
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+          <UploadCard onAnalyzed={handleAnalyzed} />
         </div>
         <div className="space-y-6">
           <div className="rounded-2xl border border-border bg-background p-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Latest analysis</h2>
-              {analysisMeta?.attempt?.exam ? (
-                <span className="text-xs text-muted-foreground">{analysisMeta.attempt.exam}</span>
+              <h2 className="text-lg font-semibold">Latest attempt</h2>
+              {state?.attempt?.exam?.detected ? (
+                <span className="text-xs text-muted-foreground">{state.attempt.exam.detected}</span>
               ) : null}
             </div>
             {loadingLatest ? (
@@ -296,74 +256,63 @@ export function AppDashboard() {
                 <Skeleton className="h-4 w-full" />
                 <Skeleton className="h-4 w-5/6" />
               </div>
-            ) : analysis ? (
+            ) : state ? (
               <div className="mt-3 space-y-3 text-sm text-muted-foreground">
-                <p className="text-foreground">{analysis.summary}</p>
-                {analysis.warnings?.length ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                    {analysis.warnings[0]}
-                  </div>
-                ) : null}
+                <p className="text-foreground">
+                  {state.attempt?.source?.type ? `Source: ${state.attempt.source.type}` : "Latest mock captured."}
+                </p>
                 <div className="flex flex-wrap gap-2 text-xs">
                   <span className="rounded-full bg-muted px-2 py-1">
-                    Pace: {analysis.signalsUsed?.paceBand || "n/a"}
+                    Score: {state.attempt?.known?.score ?? "n/a"}
                   </span>
                   <span className="rounded-full bg-muted px-2 py-1">
-                    Accuracy: {analysis.signalsUsed?.accuracyBand || "n/a"}
+                    Accuracy: {state.attempt?.known?.accuracy ? `${state.attempt.known.accuracy}%` : "n/a"}
                   </span>
                   <span className="rounded-full bg-muted px-2 py-1">
-                    Baseline: {analysis.signalsUsed?.baselineLevel || "n/a"}
+                    Persona: {state.attempt?.inferred?.persona ?? "steady"}
                   </span>
                 </div>
-                {analysisId ? (
-                  <Button asChild size="sm">
-                    <Link href={`/app?analysisId=${analysisId}`}>Open analysis</Link>
-                  </Button>
-                ) : null}
               </div>
             ) : (
               <div className="mt-3 text-sm text-muted-foreground">
-                Upload a mock to generate your first analysis.
+                Upload a mock to generate your first workflow.
               </div>
             )}
           </div>
           <div className="rounded-2xl border border-border bg-background p-6">
             <h2 className="text-lg font-semibold">Next best actions</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Follow the top actions and keep your streak alive.
+              3–5 moves that will move your next score the fastest.
             </p>
             <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-              {analysis?.nba?.slice(0, 3).map((action: any) => (
+              {state?.recommendation?.nbas?.slice(0, 3).map((action: any) => (
                 <div key={action.id} className="rounded-lg border border-border/60 p-3">
                   <p className="font-medium text-foreground">{action.title}</p>
-                  <p className="text-xs text-muted-foreground">{action.reason}</p>
+                  <p className="text-xs text-muted-foreground">{action.why}</p>
                 </div>
               ))}
-              {!analysis?.nba?.length ? (
+              {!state?.recommendation?.nbas?.length ? (
                 <p className="text-sm text-muted-foreground">Analyze a mock to see actions.</p>
               ) : null}
             </div>
           </div>
-          <div className="rounded-2xl border border-border bg-background p-6">
-            <h2 className="text-lg font-semibold">Nudge</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {nudges.length ? nudges[0].message : "Complete one action today to keep momentum."}
-            </p>
-          </div>
-          <BotWidget />
         </div>
       </section>
 
-      <section className={cn("grid gap-6", analysis ? "lg:grid-cols-[1.2fr_0.8fr]" : "")}>
-        {analysis ? (
+      <section className={cn("grid gap-6", state ? "lg:grid-cols-[1.2fr_0.8fr]" : "")}>
+        {state ? (
           <>
             <div className="space-y-6">
-              <NextBestActions actions={analysis.nba} />
-              <Checklist actions={analysis.nba} analysisId={analysisId} />
+              <InsightsSummary insights={state.recommendation.insights} />
+              <NextBestActions actions={state.recommendation.nbas} />
             </div>
             <div className="space-y-6">
-              <PlanPathway plan={analysis.plan} />
-              <NotesPanel actions={analysis.nba} analysisId={analysisId} />
+              <PlanPathway
+                plan={state.recommendation.plan}
+                onUpdate={handleTaskUpdate}
+                savingTaskId={savingTask}
+              />
+              <ProgressTracker summary={state.progressSummary} recentEvents={state.recentEvents} />
             </div>
           </>
         ) : (
