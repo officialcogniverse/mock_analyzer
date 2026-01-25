@@ -5,22 +5,22 @@ A system-level map of the codebase: UI surfaces, API routes, data flows, and sto
 
 ## High-level architecture
 - **Next.js App Router UI** in `app/` renders landing, dashboard, account, and history.
-- **Next.js API routes** in `app/api/*/route.ts` provide uploads, analysis, checklist updates, notes, history, and bots.
-- **MongoDB** stores user profiles, uploads, attempts, analyses, actions, notes, and events.
-- **Deterministic rules engine** in `lib/engine/*` builds next-best actions and 7-day plans.
+- **Next.js API routes** in `app/api/*/route.ts` provide analysis, recommendations, progress updates, history, and bots.
+- **MongoDB** stores user profiles, attempts, recommendations, progress events, and events.
+- **Deterministic rules engine** in `lib/engines/*` builds insights, next-best actions, and 7/14-day plans.
 
 ## Main runtime flows
 ### 1) Upload → Analyze
-1. **Upload**: `components/upload/UploadCard.tsx` posts to `/api/upload`.
-2. **Extraction**: `/api/upload` parses PDF text or image OCR (OpenAI if configured) and stores metadata in `uploads`.
-3. **Analyze**: `/api/analyze` creates an `attempt`, runs deterministic signals aggregation, and stores an `analysis` with NBA + plan.
+1. **Upload + analyze**: `components/upload/UploadCard.tsx` posts multipart data to `/api/analyze`.
+2. **Extraction**: `/api/analyze` parses PDF text or image OCR (OpenAI if configured).
+3. **Analyze**: `/api/analyze` creates an `attempt`, generates insights/NBAs/plan, and stores a `recommendation`.
 
-### 2) Checklist + Notes
-- **Checklist**: `components/analysis/Checklist.tsx` calls `/api/actions/mark-done` to store completion per action.
-- **Notes**: `components/analysis/NotesPanel.tsx` calls `/api/notes` to store reflections.
+### 2) Plan + Progress
+- **Plan updates**: `components/analysis/PlanPathway.tsx` calls `/api/progress` to persist task status changes.
+- **Progress tracking**: `components/analysis/ProgressTracker.tsx` displays completion and blockers.
 
 ### 3) History
-- `/api/history` aggregates attempts + analyses + uploads, returning cards for `/history`.
+- `/api/history` aggregates attempts + recommendations for `/history`.
 
 ### 4) Account + Onboarding
 - `/api/user` reads/writes the user profile document.
@@ -42,7 +42,7 @@ A system-level map of the codebase: UI surfaces, API routes, data flows, and sto
 
 ### `components/`
 - `components/upload/UploadCard.tsx`: multi-input upload UI.
-- `components/analysis/*`: NBA list, plan, checklist, and notes.
+- `components/analysis/*`: NBA list, plan, insights, and progress.
 - `components/bot/BotWidget.tsx`: helper + EI bot UI.
 - `components/share/ShareCard.tsx`: shareable summary UI.
 
@@ -50,17 +50,15 @@ A system-level map of the codebase: UI surfaces, API routes, data flows, and sto
 - `lib/auth.ts`: NextAuth config.
 - `lib/mongodb.ts`: Mongo client and `getDb()`.
 - `lib/db.ts`: collection names + indexes.
-- `lib/engine/signals.ts`: deterministic NBA + plan builder.
+- `lib/engines/*`: deterministic analysis, insights, NBA, plan, and memory logic.
 - `lib/engine/nudges.ts`: nudge rules.
 - `lib/schemas/*`: shared Zod schemas.
 
 ## Data model (MongoDB)
 - **users**: `userId`, `email`, `displayName`, `examGoal`, `weeklyHours`, `preferences`, `onboardingCompleted`, `deletedAt`.
-- **uploads**: `userId`, `type`, `filename`, `mimeType`, `size`, `extractedText`, `storageRef`.
-- **attempts**: `userId`, `uploadId`, `exam`, `rawTextHash`.
-- **analyses**: `userId`, `attemptId`, `summary`, `nba`, `plan`, `signalsUsed`.
-- **actions**: `userId`, `analysisId`, `actionId`, `done`, `completedAt`.
-- **notes**: `userId`, `analysisId`, `actionId`, `content`.
+- **attempts**: `userId`, `source`, `exam`, `rawTextHash`, `known`, `inferred`, `missing`.
+- **recommendations**: `userId`, `attemptId`, `insights`, `nbas`, `plan`, `strategy`.
+- **progress_events**: `userId`, `recommendationId`, `type`, `payload`.
 - **events**: `userId`, `eventName`, `payload`, `timestamp`.
 
 ## External dependencies

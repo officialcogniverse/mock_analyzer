@@ -8,19 +8,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-export type UploadResult = {
-  uploadId: string;
-  filename?: string | null;
-  type?: "pdf" | "image" | "text";
-  extraction: { status: "ok" | "needs_intake"; confidence?: number; reason?: string };
-  extractedTextSnippet?: string;
+export type AnalyzeResult = {
+  attempt: Record<string, any>;
+  recommendation: Record<string, any>;
+  progressSummary: Record<string, any>;
+  recentEvents: Array<Record<string, any>>;
 };
 
 type UploadCardProps = {
-  onUploaded: (result: UploadResult) => void;
+  onAnalyzed: (result: AnalyzeResult) => void;
 };
 
-export function UploadCard({ onUploaded }: UploadCardProps) {
+export function UploadCard({ onAnalyzed }: UploadCardProps) {
   const [tab, setTab] = React.useState("file");
   const [file, setFile] = React.useState<File | null>(null);
   const [text, setText] = React.useState("");
@@ -37,16 +36,16 @@ export function UploadCard({ onUploaded }: UploadCardProps) {
       if (tab === "text") {
         form.append("text", text);
       }
-      const res = await fetch("/api/upload", {
+      const res = await fetch("/api/analyze", {
         method: "POST",
         body: form,
       });
       const json = await res.json();
       if (json.ok) {
-        onUploaded(json.data);
-        toast.success("Upload complete");
+        onAnalyzed(json.data);
+        toast.success("Analysis ready");
       } else {
-        toast.error(json.error?.message || "Upload failed");
+        toast.error(json.error?.message || "Analyze failed");
       }
     } finally {
       setLoading(false);
@@ -78,14 +77,19 @@ export function UploadCard({ onUploaded }: UploadCardProps) {
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
+          <p className="text-xs text-muted-foreground">Minimum 80 characters for reliable analysis.</p>
         </TabsContent>
       </Tabs>
       <Button
         className="mt-4"
         onClick={handleSubmit}
-        disabled={loading || (tab === "file" && !file) || (tab === "text" && !text.trim())}
+        disabled={
+          loading ||
+          (tab === "file" && !file) ||
+          (tab === "text" && text.trim().length < 80)
+        }
       >
-        {loading ? "Uploading..." : "Upload"}
+        {loading ? "Analyzing..." : "Analyze"}
       </Button>
     </div>
   );

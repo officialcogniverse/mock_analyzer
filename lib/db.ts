@@ -5,6 +5,9 @@ export const COLLECTIONS = {
   uploads: "uploads",
   attempts: "attempts",
   analyses: "analyses",
+  recommendations: "recommendations",
+  progressEvents: "progress_events",
+  memoryTuples: "memory_tuples",
   actions: "actions",
   notes: "notes",
   events: "events",
@@ -36,6 +39,22 @@ export async function ensureIndexes(db: Db) {
 
     // ANALYSES
     await ensureIndex(db, COLLECTIONS.analyses, { userId: 1, attemptId: 1 });
+
+    // RECOMMENDATIONS
+    await ensureIndex(db, COLLECTIONS.recommendations, { userId: 1, createdAt: -1 });
+    await ensureIndex(db, COLLECTIONS.recommendations, { attemptId: 1 }, { unique: true });
+
+    // PROGRESS EVENTS
+    await ensureIndex(db, COLLECTIONS.progressEvents, { userId: 1, createdAt: -1 });
+    await ensureIndex(db, COLLECTIONS.progressEvents, { recommendationId: 1, createdAt: -1 });
+
+    // MEMORY TUPLES
+    await ensureIndex(
+      db,
+      COLLECTIONS.memoryTuples,
+      { userId: 1, exam: 1, persona: 1, strategy: 1 },
+      { unique: true }
+    );
 
     // ACTIONS — one record per action completion
     await ensureIndex(db, COLLECTIONS.actions, { userId: 1, analysisId: 1, actionId: 1 }, { unique: true });
