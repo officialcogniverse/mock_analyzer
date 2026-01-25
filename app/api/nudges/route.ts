@@ -7,6 +7,7 @@ import { getDb } from "@/lib/mongodb";
 import { COLLECTIONS, ensureIndexes } from "@/lib/db";
 import { buildNudges } from "@/lib/engine/nudges";
 import { assertActiveUser } from "@/lib/users";
+import type { EventDoc } from "@/lib/events";
 
 export const runtime = "nodejs";
 
@@ -23,7 +24,7 @@ export async function GET() {
 
   const db = await getDb();
   await ensureIndexes(db);
-  const events = db.collection(COLLECTIONS.events);
+  const events = db.collection<EventDoc>(COLLECTIONS.events);
   const actions = db.collection(COLLECTIONS.actions);
 
   const recentEvents = await events.find({ userId }).sort({ timestamp: -1 }).limit(20).toArray();

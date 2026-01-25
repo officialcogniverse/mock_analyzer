@@ -82,6 +82,8 @@ type AnalyzeBundle = {
   } | null;
 };
 
+type AnalyzeBundleAttempt = NonNullable<AnalyzeBundle["bundle"]>["attempt"];
+
 function clampPlanVariant(value: number): PlanVariantDays {
   if (value <= 3) return 3;
   if (value <= 5) return 5;
@@ -156,7 +158,7 @@ function normalizeTrustBreakdown(report: any, lockedReasoning: boolean): TrustBr
   };
 }
 
-function normalizeAttemptFromBundle(attempt: AnalyzeBundle["bundle"]["attempt"], fallbackExam: string) {
+function normalizeAttemptFromBundle(attempt: AnalyzeBundleAttempt, fallbackExam: string) {
   const metrics = attempt?.metrics || [];
   const scoreMetric = metrics.find((metric) => /score/i.test(metric.label));
   const percentileMetric = metrics.find((metric) => /percentile/i.test(metric.label));
@@ -188,7 +190,10 @@ function normalizeAttemptFromBundle(attempt: AnalyzeBundle["bundle"]["attempt"],
   };
 }
 
-function normalizeActionsFromReport(report: any, lockedActionIds: string[]): NextBestAction[] {
+function normalizeActionsFromReport(
+  report: any,
+  lockedActionIds: readonly string[]
+): NextBestAction[] {
   const incoming = Array.isArray(report?.next_actions) ? report.next_actions : [];
 
   const mapped = incoming.slice(0, MAX_ACTIONS).map((action: any, index: number) => {
@@ -376,9 +381,13 @@ function applyPlanLocks(plan: PlanDay[], paywallLockedPlan: boolean) {
 function recomputePlan(report: Report): Report {
   const today = deriveTodayPlan(report.plan);
 
-  const plan = report.plan.map((day) => ({
+  const plan: PlanDay[] = report.plan.map((day) => ({
     ...day,
-    status: day.id === today.id ? "current" : day.status === "current" ? "upcoming" : day.status,
+    status: (day.id === today.id
+      ? "current"
+      : day.status === "current"
+      ? "upcoming"
+      : day.status) as PlanDay["status"],
   }));
 
   return { ...report, plan };

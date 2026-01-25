@@ -5,8 +5,6 @@ import { buildPrompt } from "./prompts";
 import type { AnalyzeInput, StrategyMeta } from "./types";
 import { z } from "zod";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 /**
  * Model selection:
  * - Report generation can be cheaper (structure-heavy, less reasoning)
@@ -236,6 +234,11 @@ async function generateStrategyPlanOnce(params: {
   const baseUser = buildStrategyUserContent({ input, report, strategyMeta });
   const userContent = retryNote ? `${baseUser}\n\nRETRY_NOTE:\n${retryNote}` : baseUser;
 
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const sres = await client.responses.parse({
     model: STRATEGY_MODEL,
     input: [
@@ -256,6 +259,11 @@ async function generateStrategyPlanOnce(params: {
 }
 
 export async function analyzeMock(input: AnalyzeInput): Promise<Report> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Missing OPENAI_API_KEY");
+  }
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const prompt = buildPrompt(input);
 
   const response = await client.responses.parse({

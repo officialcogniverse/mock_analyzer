@@ -1,8 +1,6 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import type { CoachCitation, CoachMode } from "@/lib/contracts";
-
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const COACH_MODEL = process.env.OPENAI_COACH_MODEL || "gpt-4.1-mini";
 
 const CoachLLMResponseSchema = z
@@ -215,6 +213,15 @@ export async function generateCoachReply(params: {
   const system = buildSystemPrompt(params.mode);
   const user = buildUserPrompt(params);
 
+  if (!process.env.OPENAI_API_KEY) {
+    return {
+      answer:
+        "AI coaching is temporarily unavailable. Focus on the top action in your list and retry once your workspace is configured.",
+      citations: ensureGroundedCitations(params.context, []),
+    };
+  }
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const response = await client.responses.create({
     model: COACH_MODEL,
     input: [

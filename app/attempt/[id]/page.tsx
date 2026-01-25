@@ -12,7 +12,13 @@ import { EmptyState } from "@/components/empty-state";
 import { PatternCard } from "@/components/pattern-card";
 import { ActionChecklist } from "@/components/action-checklist";
 import { useAttempt } from "@/lib/hooks/useAttempt";
-import type { ActionState, ReportAction, ReportPlanTask } from "@/lib/domain/types";
+import type {
+  ActionState,
+  Report,
+  ReportAction,
+  ReportFollowup,
+  ReportPlanTask,
+} from "@/lib/domain/schemas";
 import { cn } from "@/lib/utils";
 
 function formatDate(value: string | null | undefined, timezone?: string) {
@@ -164,7 +170,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
   }, [history]);
 
 
-  const accuracyMetric = attempt?.metrics?.find((metric) =>
+  const accuracyMetric = attempt?.metrics?.find((metric: { label: string; value?: string }) =>
     metric.label.toLowerCase().includes("accuracy")
   );
   const attemptAccuracy = extractAccuracy(accuracyMetric?.value);
@@ -274,7 +280,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
                     Quick follow-ups to sharpen your next report
                   </p>
                   <ul className="list-disc space-y-1 pl-5 text-amber-900/90">
-                    {report.followups.map((followup) => (
+                    {report.followups.map((followup: ReportFollowup) => (
                       <li key={followup.id}>
                         {followup.question}
                         {followup.type === "single" && followup.options?.length
@@ -324,7 +330,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
               description="Treat these as the root causes. The plan below is built to counter them."
             />
             <div className="grid gap-4">
-              {report.patterns.slice(0, 6).map((pattern, index) => (
+              {report.patterns.slice(0, 6).map((pattern: Report["patterns"][number], index) => (
                 <PatternCard key={pattern.id} pattern={pattern} index={index} />
               ))}
             </div>
@@ -351,7 +357,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
               description="Each day is designed to reinforce the same decision rules until they stick."
             />
             <div className="grid gap-3">
-              {report.plan.days.map((day) => (
+              {report.plan.days.map((day: Report["plan"]["days"][number]) => (
                 <div key={day.day_index} className="rounded-2xl border bg-white p-4 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -365,7 +371,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
                     </Badge>
                   </div>
                   <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    {day.tasks.map((task, idx) => {
+                    {day.tasks.map((task: ReportPlanTask, idx) => {
                       const linked = task.action_id ? stateMap.get(task.action_id) : null;
                       const done = linked?.status === "completed";
                       return (
@@ -399,7 +405,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
               description="Run these probes to confirm the bottleneck is actually shrinking."
             />
             <div className="grid gap-3 md:grid-cols-2">
-              {report.probes.map((probe) => (
+              {report.probes.map((probe: Report["probes"][number]) => (
                 <div key={probe.id} className="rounded-2xl border bg-white p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-900">{probe.title}</p>

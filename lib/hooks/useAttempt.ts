@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AttemptDetail } from "@/lib/domain/types";
+import type { AttemptDetail } from "@/lib/domain/schemas";
 import { AttemptDetailSchema } from "@/lib/domain/schemas";
 
 type AttemptState = {

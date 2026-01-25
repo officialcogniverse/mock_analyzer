@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const EventNameSchema = z.enum([
+  "login_success",
+  "coach_message_sent",
   "upload_attempt",
   "analyze_attempt",
   "view_actions",
