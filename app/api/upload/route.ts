@@ -4,7 +4,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import { nanoid } from "nanoid";
 
-import { authOptions } from "@/lib/auth";
+import { authOptions, getSessionUserId } from "@/lib/auth";
 import { ok, fail, mapZodError } from "@/lib/api/errors";
 import { getDb } from "@/lib/mongodb";
 import { COLLECTIONS, ensureIndexes } from "@/lib/db";
@@ -41,10 +41,10 @@ export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const userId = getSessionUserId(session);
+  if (!userId) {
     return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
   }
-  const userId = session.user.id;
   const activeUser = await assertActiveUser(userId);
   if (!activeUser || activeUser.blocked) {
     return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });

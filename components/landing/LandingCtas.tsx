@@ -5,8 +5,11 @@ import { signIn, useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 
 export function LandingCtas() {
-  const { status } = useSession();
-  const authed = status === "authenticated";
+  const { data: session } = useSession();
+  const userId =
+    session?.user?.id ??
+    (session?.user?.email ? session.user.email.trim().toLowerCase() : undefined);
+  const authed = Boolean(userId);
 
   return (
     <div className="flex flex-wrap gap-3">

@@ -1,10 +1,18 @@
 import GoogleProvider from "next-auth/providers/google";
-import type { NextAuthOptions } from "next-auth";
+import type { NextAuthOptions, Session } from "next-auth";
 import { ensureIndexes, COLLECTIONS } from "@/lib/db";
 import { getDb } from "@/lib/mongodb";
 
-function normalizeUserId(email: string) {
+export function normalizeUserId(email: string) {
   return email.trim().toLowerCase();
+}
+
+export function getSessionUserId(session: Session | null) {
+  if (!session?.user) return null;
+  const userId = (session.user as { id?: string }).id;
+  if (userId) return String(userId);
+  if (session.user.email) return normalizeUserId(session.user.email);
+  return null;
 }
 
 export const authOptions: NextAuthOptions = {
