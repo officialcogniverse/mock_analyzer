@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
-import { Toaster } from "sonner";
-
-import { CogniverseProvider } from "@/lib/domain/mockData";
 import { ThemeProvider } from "@/components/providers/theme-provider";
-import { AuthSessionProvider } from "@/components/providers/session-provider";
 import { SiteHeader } from "@/components/navigation/SiteHeader";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,13 +19,9 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
         <ThemeProvider>
-          <AuthSessionProvider>
-            <CogniverseProvider>
-              <SiteHeader />
-              {children}
-              <Toaster richColors position="top-right" />
-            </CogniverseProvider>
-          </AuthSessionProvider>
+          <SiteHeader />
+          {children}
+          <ChatWidget />
         </ThemeProvider>
       </body>
     </html>

@@ -1,23 +1,37 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions, getSessionUserId } from "@/lib/auth";
-import { ok, fail, mapZodError } from "@/lib/api/errors";
+import { z } from "zod";
+import { fail, mapZodError } from "@/lib/api/errors";
 import { AnalyzeTextSchema, RecommendationBundleSchema } from "@/lib/schemas/workflow";
 import { getDb } from "@/lib/mongodb";
 import { COLLECTIONS, ensureIndexes } from "@/lib/db";
 import { extractTextFromPdf } from "@/lib/extractText";
-import { extractTextFromImages } from "@/lib/extractTextFromImages";
 import { analyzeMock } from "@/lib/engines/mockAnalysis";
 import { buildInsights } from "@/lib/engines/insights";
 import { buildNbas } from "@/lib/engines/nba";
 import { buildPlan } from "@/lib/engines/plan";
 import { loadMemorySummary, recordStrategyUsage, selectStrategy } from "@/lib/engines/memory";
-import { assertActiveUser } from "@/lib/users";
+import { buildProbes } from "@/lib/engines/probes";
+import { buildNextMockStrategy } from "@/lib/engines/nextMockStrategy";
 import { attachSessionCookie, ensureSession } from "@/lib/session";
-import { upsertUser } from "@/lib/persist";
 
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_RAWTEXT_LENGTH = 6000;
+
+const IntakeSchema = z.object({
+  goal: z.enum(["score", "accuracy", "speed", "concepts"]),
+  hardest: z.enum(["selection", "time", "concepts", "careless", "anxiety", "consistency"]),
+  weekly_hours: z.enum(["<10", "10-20", "20-35", "35+"]),
+  next_mock_date: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => (value ? value : undefined)),
+  preferred_topics: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => (value ? value : undefined)),
+});
 
 function hashText(text: string) {
   let hash = 0;
@@ -31,8 +45,14 @@ function hashText(text: string) {
 export const runtime = "nodejs";
 
 function isPdfParseXrefError(err: unknown) {
+  const error = err instanceof Error ? err : null;
+  const cause = error && "cause" in error ? (error as { cause?: unknown }).cause : null;
   const msg =
-    (err instanceof Error ? err.message : typeof err === "string" ? err : "")?.toString() || "";
+    (
+      (cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "") ||
+      error?.message ||
+      (typeof err === "string" ? err : "")
+    )?.toString() || "";
   // pdf.js / pdf-parse commonly emits these
   return (
     msg.toLowerCase().includes("bad xref") ||
@@ -42,21 +62,8 @@ function isPdfParseXrefError(err: unknown) {
 }
 
 export async function POST(req: Request) {
-  // --- Auth / Session resolution ---
-  const session = await getServerSession(authOptions);
-  const userId = getSessionUserId(session);
-  const fallbackSession = userId ? null : ensureSession(req);
-  const resolvedUserId = userId || fallbackSession?.userId;
-
-  if (!resolvedUserId) {
-    return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
-  }
-
-  await upsertUser(resolvedUserId);
-  const activeUser = await assertActiveUser(resolvedUserId);
-  if (!activeUser || activeUser.blocked) {
-    return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });
-  }
+  const session = ensureSession(req);
+  const userId = session.userId;
 
   // --- Input validation ---
   const contentType = req.headers.get("content-type") || "";
@@ -72,13 +79,37 @@ export async function POST(req: Request) {
       ? fileEntry
       : filesEntry.find((entry): entry is File => entry instanceof File) ?? null;
   const textInput = form.get("text")?.toString() ?? "";
+  const intakeInput = form.get("intake")?.toString() ?? "";
+
+  const intakeParsed = IntakeSchema.safeParse(
+    intakeInput
+      ? (() => {
+          try {
+            return JSON.parse(intakeInput);
+          } catch {
+            return null;
+          }
+        })()
+      : null
+  );
+
+  if (!intakeParsed.success) {
+    return NextResponse.json(
+      fail(
+        "INVALID_INTAKE",
+        "Invalid intake payload.",
+        intakeParsed.error ? mapZodError(intakeParsed.error) : undefined
+      ),
+      { status: 400 }
+    );
+  }
+  const intake = intakeParsed.data;
 
   // --- Extract text ---
   let rawText = "";
   let sourceType: "pdf" | "image" | "text" = "text";
   let filename: string | null = null;
   let textChars = 0;
-  const missingFromInput: string[] = [];
   let extractionNotes: string | undefined;
 
   if (file) {
@@ -111,15 +142,11 @@ export async function POST(req: Request) {
       }
     } else if (["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
       sourceType = "image";
-      rawText = await extractTextFromImages([{ mime: file.type, data: buffer }]);
-      if (!rawText) {
-        missingFromInput.push("image_ocr_not_available");
-        extractionNotes = "Image OCR is unavailable; ask user to paste text or upload PDF.";
-        return NextResponse.json(
-          fail("EMPTY_INPUT", "We couldn’t read that image. Please upload a PDF or paste the text."),
-          { status: 400 }
-        );
-      }
+      extractionNotes = "Image OCR is unavailable; ask user to paste text or upload PDF.";
+      return NextResponse.json(
+        fail("IMAGE_OCR_UNAVAILABLE", "Image OCR is unavailable. Please upload a PDF or paste the text."),
+        { status: 400 }
+      );
     } else {
       return NextResponse.json(fail("UNSUPPORTED_FILE", "Only PDF or image uploads are supported."), {
         status: 400,
@@ -165,7 +192,7 @@ export async function POST(req: Request) {
     confidenceGap: insights.inferred.confidenceGap,
   };
 
-  const missing = [...new Set([...attempt.missing, ...missingFromInput])];
+  const missing = [...new Set([...attempt.missing])];
 
   const db = await getDb();
   await ensureIndexes(db);
@@ -174,7 +201,7 @@ export async function POST(req: Request) {
   const examLabel = exam.detected ?? "agnostic";
   const memorySummary = await loadMemorySummary(
     db,
-    resolvedUserId,
+    userId,
     examLabel,
     inferred.persona ?? "steady"
   );
@@ -191,11 +218,15 @@ export async function POST(req: Request) {
   });
 
   const plan = buildPlan(nbas, strategy.horizonDays);
+  const probes = buildProbes({ ...attempt, inferred, missing });
+  const nextMockStrategy = buildNextMockStrategy({ ...attempt, inferred, missing });
 
   const recommendation = RecommendationBundleSchema.parse({
     insights: { ...insights, inferred, missing },
     nbas,
     plan,
+    probes,
+    nextMockStrategy,
     strategy: { id: strategy.id, exam: strategy.exam, persona: strategy.persona },
   });
 
@@ -204,13 +235,14 @@ export async function POST(req: Request) {
   const recommendations = db.collection(COLLECTIONS.recommendations);
 
   const attemptDoc = {
-    userId: resolvedUserId,
+    userId,
     createdAt: new Date(),
     source: {
       type: sourceType,
       filename,
       textChars,
     },
+    intake,
     exam,
     rawText: normalizedRawText,
     rawTextHash: hashText(rawText),
@@ -226,43 +258,40 @@ export async function POST(req: Request) {
   const attemptResult = await attempts.insertOne(attemptDoc);
 
   const recommendationDoc = {
-    userId: resolvedUserId,
+    userId,
     attemptId: attemptResult.insertedId.toString(),
     createdAt: new Date(),
     insights: recommendation.insights,
     nbas: recommendation.nbas,
     plan: recommendation.plan,
+    probes: recommendation.probes,
+    nextMockStrategy: recommendation.nextMockStrategy,
     strategy: recommendation.strategy,
   };
 
   const recommendationResult = await recommendations.insertOne(recommendationDoc);
 
-  await recordStrategyUsage(db, resolvedUserId, strategy);
+  await recordStrategyUsage(db, userId, strategy);
 
   // --- Response ---
-  const res = NextResponse.json(
-    ok({
-      id: attemptResult.insertedId.toString(),
-      recommendationId: recommendationResult.insertedId.toString(),
-      attempt: { ...attemptDoc, _id: attemptResult.insertedId.toString() },
-      recommendation: {
-        ...recommendationDoc,
-        _id: recommendationResult.insertedId.toString(),
-      },
-      progressSummary: {
-        completionRate: 0,
-        tasksDone: 0,
-        tasksTotal: recommendation.plan.days.reduce((sum, day) => sum + day.tasks.length, 0),
-        difficultCount: 0,
-        skippedCount: 0,
-        topBlockers: [],
-      },
-      recentEvents: [],
-    })
-  );
+  const res = NextResponse.json({
+    ok: true,
+    id: attemptResult.insertedId.toString(),
+    recommendationId: recommendationResult.insertedId.toString(),
+    attempt: {
+      ...attemptDoc,
+      _id: attemptResult.insertedId.toString(),
+      createdAt: attemptDoc.createdAt.toISOString(),
+    },
+    recommendation: {
+      ...recommendationDoc,
+      _id: recommendationResult.insertedId.toString(),
+      createdAt: recommendationDoc.createdAt.toISOString(),
+    },
+  });
 
-  if (fallbackSession?.isNew) {
-    attachSessionCookie(res, fallbackSession);
+  if (session.isNew) {
+    attachSessionCookie(res, session);
   }
 
   return res;

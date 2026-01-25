@@ -1,6 +1,6 @@
 # Cogniverse Mock Analyzer
 
-Cogniverse Mock Analyzer is a Next.js app that turns mock scorecards into deterministic insights, next-best actions, a 7/14-day plan, and progress tracking.
+Cogniverse Mock Analyzer is a lean Next.js MVP that turns mock scorecards into deterministic insights, next-best actions, drills, and a next-mock strategy script. It is session-cookie only (guest mode) and stores attempts in MongoDB.
 
 ## Quick start
 
@@ -15,60 +15,29 @@ Open [http://localhost:3000](http://localhost:3000).
 Create a `.env.local` file:
 
 ```bash
-# MongoDB
 MONGODB_URI="mongodb://localhost:27017"
 MONGODB_DB="cogniverse"
-
-# NextAuth (Google)
-NEXTAUTH_SECRET="your-secret"
-NEXTAUTH_URL="http://localhost:3000"
-GOOGLE_CLIENT_ID="your-google-client-id"
-GOOGLE_CLIENT_SECRET="your-google-client-secret"
-
-# Optional: OpenAI (used for OCR if enabled)
-OPENAI_API_KEY=""
 ```
 
-## Core flows
+## Core flow
 
-- **Upload → Analyze → Insights/NBAs/Plan → Progress → History**
-- Deterministic signal aggregation (no embeddings or ML) for next-best actions and plan generation.
+- **Dashboard** (`/`) → upload PDF or paste text → `POST /api/analyze`.
+- **Report** (`/report/[id]`) → `GET /api/attempts/[id]` for the attempt + recommendation.
 
-## Architecture
+## API contracts
 
-```mermaid
-flowchart TD
-  User((User)) -->|Sign in| NextAuth[NextAuth Google]
-  User -->|Upload PDF/Image/Text| UploadUI[UploadCard]
-  UploadUI --> AnalyzeAPI[/api/analyze]
-  AnalyzeAPI --> Extract[PDF/OCR Extraction]
-  AnalyzeAPI --> MongoAttempts[(attempts)]
-  AnalyzeAPI --> MongoRecs[(recommendations)]
+### `POST /api/analyze`
+`multipart/form-data` with:
 
-  User --> Dashboard[/app Dashboard]
-  Dashboard --> ProgressAPI[/api/progress]
-  Dashboard --> EventsAPI[/api/events]
-  Dashboard --> NudgesAPI[/api/nudges]
+- `file?`: PDF (images accepted but OCR is not enabled yet)
+- `text?`: pasted text
+- `intake`: JSON string `{ goal, hardest, weekly_hours, next_mock_date?, preferred_topics? }`
 
-  ProgressAPI --> MongoProgress[(progress_events)]
-  EventsAPI --> MongoEvents[(events)]
+Returns `{ ok: true, id, recommendationId, attempt, recommendation }`.
 
-  User --> History[/history]
-  History --> HistoryAPI[/api/history]
-  HistoryAPI --> MongoAttempts
-  HistoryAPI --> MongoRecs
-
-  User --> Account[/account]
-  Account --> UserAPI[/api/user]
-  Account --> ExportAPI[/api/account/export]
-  Account --> DeleteAPI[/api/account/delete]
-  UserAPI --> MongoUsers[(users)]
-  ExportAPI --> MongoUsers
-  DeleteAPI --> MongoUsers
-```
-
-For a diagram source file, see [`docs/architecture.mmd`](./docs/architecture.mmd).
+### `GET /api/attempts/[id]`
+Returns `{ ok: true, attempt, recommendation }` for the current session cookie.
 
 ## Code map
 
-See [`CODEMAP.md`](./CODEMAP.md) for the detailed structure and data model.
+See [`CODEMAP.md`](./CODEMAP.md) for the updated structure and data model.
