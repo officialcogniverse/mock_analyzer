@@ -17,6 +17,41 @@ const BodySchema = z.object({
 
 export const runtime = "nodejs";
 
+export async function GET(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
+  }
+  const userId = session.user.id;
+  const activeUser = await assertActiveUser(userId);
+  if (!activeUser || activeUser.blocked) {
+    return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });
+  }
+
+  const url = new URL(req.url);
+  const analysisId = String(url.searchParams.get("analysisId") || "").trim();
+  if (!analysisId) {
+    return NextResponse.json(fail("INVALID_INPUT", "analysisId is required."), { status: 400 });
+  }
+
+  const db = await getDb();
+  await ensureIndexes(db);
+  const notes = db.collection(COLLECTIONS.notes);
+
+  const docs = await notes.find({ userId, analysisId }).sort({ createdAt: -1 }).limit(50).toArray();
+
+  return NextResponse.json(
+    ok({
+      items: docs.map((doc) => ({
+        noteId: doc._id.toString(),
+        actionId: doc.actionId,
+        content: doc.content,
+        createdAt: doc.createdAt,
+      })),
+    })
+  );
+}
+
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {

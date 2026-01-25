@@ -30,10 +30,17 @@ export async function POST(req: Request) {
   }
 
   const reply = respondWithFeatureCatalog(parsed.data.message);
+  const matches = reply.matches.map(({ score, ...rest }) => rest);
   fireAndForgetEvent({
     userId,
-    payload: { eventName: "chat_with_bot", payload: { type: "feature" } },
+    payload: { eventName: "chat_with_bot", payload: { mode: "feature", length: parsed.data.message.length } },
   });
 
-  return NextResponse.json(ok({ reply: reply.reply, suggestedActions: reply.actions ?? [] }));
+  return NextResponse.json(
+    ok({
+      reply: reply.reply,
+      matches,
+      suggestions: reply.suggestions,
+    })
+  );
 }

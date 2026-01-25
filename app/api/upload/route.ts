@@ -123,6 +123,8 @@ export async function POST(req: Request) {
     return NextResponse.json(
       ok({
         uploadId: result.insertedId.toString(),
+        filename,
+        type,
         extraction,
         extractedTextSnippet: extractedText.slice(0, 280),
       })

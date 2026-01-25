@@ -10,6 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export type UploadResult = {
   uploadId: string;
+  filename?: string | null;
+  type?: "pdf" | "image" | "text";
   extraction: { status: "ok" | "needs_intake"; confidence?: number; reason?: string };
   extractedTextSnippet?: string;
 };

@@ -4,7 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { ok, fail } from "@/lib/api/errors";
 import { EiBotRequestSchema } from "@/lib/schemas/bot";
-import { respondWithEiTemplate } from "@/lib/bots/ei";
+import { generateEiResponse } from "@/lib/bots/ei";
 import { fireAndForgetEvent } from "@/lib/events";
 import { assertActiveUser } from "@/lib/users";
 
@@ -29,10 +29,10 @@ export async function POST(req: Request) {
     });
   }
 
-  const response = respondWithEiTemplate(parsed.data.message);
+  const response = await generateEiResponse(parsed.data.message);
   fireAndForgetEvent({
     userId,
-    payload: { eventName: "chat_with_bot", payload: { type: "ei" } },
+    payload: { eventName: "chat_with_bot", payload: { mode: "ei", length: parsed.data.message.length } },
   });
 
   return NextResponse.json(ok(response));
