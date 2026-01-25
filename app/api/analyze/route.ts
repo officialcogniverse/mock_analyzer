@@ -16,22 +16,25 @@ import { attachSessionCookie, ensureSession } from "@/lib/session";
 
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_RAWTEXT_LENGTH = 6000;
+const MIN_EXTRACTED_TEXT = 50;
 
-const IntakeSchema = z.object({
-  goal: z.enum(["score", "accuracy", "speed", "concepts"]),
-  hardest: z.enum(["selection", "time", "concepts", "careless", "anxiety", "consistency"]),
-  weekly_hours: z.enum(["<10", "10-20", "20-35", "35+"]),
-  next_mock_date: z
-    .string()
-    .trim()
-    .optional()
-    .transform((value) => (value ? value : undefined)),
-  preferred_topics: z
-    .string()
-    .trim()
-    .optional()
-    .transform((value) => (value ? value : undefined)),
-});
+const IntakeSchema = z
+  .object({
+    goal: z.enum(["score", "accuracy", "speed", "concepts"]).optional(),
+    hardest: z.enum(["selection", "time", "concepts", "careless", "anxiety", "consistency"]).optional(),
+    weekly_hours: z.enum(["<10", "10-20", "20-35", "35+"]).optional(),
+    next_mock_date: z
+      .string()
+      .trim()
+      .optional()
+      .transform((value) => (value ? value : undefined)),
+    preferred_topics: z
+      .string()
+      .trim()
+      .optional()
+      .transform((value) => (value ? value : undefined)),
+  })
+  .default({});
 
 function hashText(text: string) {
   let hash = 0;
@@ -53,7 +56,7 @@ function isPdfParseXrefError(err: unknown) {
       error?.message ||
       (typeof err === "string" ? err : "")
     )?.toString() || "";
-  // pdf.js / pdf-parse commonly emits these
+
   return (
     msg.toLowerCase().includes("bad xref") ||
     msg.toLowerCase().includes("xref") ||
@@ -61,49 +64,63 @@ function isPdfParseXrefError(err: unknown) {
   );
 }
 
+async function parseRequest(req: Request): Promise<{
+  file: File | null;
+  textInput: string;
+  intakeInput: string; // stringified JSON or ""
+}> {
+  const contentType = req.headers.get("content-type") || "";
+
+  // 1) multipart/form-data (file upload or paste)
+  if (contentType.includes("multipart/form-data")) {
+    const form = await req.formData();
+    const fileEntry = form.get("file");
+    const filesEntry = form.getAll("files");
+
+    const file =
+      fileEntry instanceof File
+        ? fileEntry
+        : filesEntry.find((entry): entry is File => entry instanceof File) ?? null;
+
+    const textInput = form.get("text")?.toString() ?? "";
+    const intakeInput = form.get("intake")?.toString() ?? "";
+
+    return { file, textInput, intakeInput };
+  }
+
+  // 2) JSON (paste text from client)
+  if (contentType.includes("application/json")) {
+    const body = await req.json().catch(() => ({} as any));
+    const textInput = typeof body?.text === "string" ? body.text : "";
+    const intakeInput = body?.intake ? JSON.stringify(body.intake) : "";
+    return { file: null, textInput, intakeInput };
+  }
+
+  // 3) Fallback: plain text
+  const textInput = await req.text().catch(() => "");
+  return { file: null, textInput, intakeInput: "" };
+}
+
 export async function POST(req: Request) {
   const session = ensureSession(req);
   const userId = session.userId;
 
-  // --- Input validation ---
-  const contentType = req.headers.get("content-type") || "";
-  if (!contentType.includes("multipart/form-data")) {
-    return NextResponse.json(fail("INVALID_REQUEST", "Expected multipart/form-data."), { status: 400 });
+  // --- Parse request (supports multipart + json) ---
+  const { file, textInput, intakeInput } = await parseRequest(req);
+
+  // --- Parse intake (optional) ---
+  let intake: z.infer<typeof IntakeSchema> = {};
+  if (intakeInput && intakeInput.trim()) {
+    try {
+      intake = IntakeSchema.parse(JSON.parse(intakeInput));
+    } catch (err) {
+      const zerr = err instanceof z.ZodError ? err : null;
+      return NextResponse.json(
+        fail("INVALID_INTAKE", "Invalid intake payload.", zerr ? mapZodError(zerr) : undefined),
+        { status: 400 }
+      );
+    }
   }
-
-  const form = await req.formData();
-  const fileEntry = form.get("file");
-  const filesEntry = form.getAll("files");
-  const file =
-    fileEntry instanceof File
-      ? fileEntry
-      : filesEntry.find((entry): entry is File => entry instanceof File) ?? null;
-  const textInput = form.get("text")?.toString() ?? "";
-  const intakeInput = form.get("intake")?.toString() ?? "";
-
-  const intakeParsed = IntakeSchema.safeParse(
-    intakeInput
-      ? (() => {
-          try {
-            return JSON.parse(intakeInput);
-          } catch {
-            return null;
-          }
-        })()
-      : null
-  );
-
-  if (!intakeParsed.success) {
-    return NextResponse.json(
-      fail(
-        "INVALID_INTAKE",
-        "Invalid intake payload.",
-        intakeParsed.error ? mapZodError(intakeParsed.error) : undefined
-      ),
-      { status: 400 }
-    );
-  }
-  const intake = intakeParsed.data;
 
   // --- Extract text ---
   let rawText = "";
@@ -125,10 +142,9 @@ export async function POST(req: Request) {
       try {
         rawText = await extractTextFromPdf(buffer);
       } catch (err) {
-        // IMPORTANT: do not 500 on bad PDFs; return actionable 400
         const xref = isPdfParseXrefError(err);
         extractionNotes = xref
-          ? "PDF parsing failed (bad cross-reference table). This can happen with certain generated/scanned PDFs."
+          ? "PDF parsing failed (bad cross-reference table)."
           : "PDF parsing failed.";
         return NextResponse.json(
           fail(
@@ -136,6 +152,17 @@ export async function POST(req: Request) {
             xref
               ? "This PDF can’t be read (corrupted/unsupported structure). Try exporting it again, uploading a different PDF, or paste the text instead."
               : "We couldn’t read that PDF. Try a different PDF or paste the text."
+          ),
+          { status: 400 }
+        );
+      }
+
+      rawText = (rawText || "").trim();
+      if (rawText.length < MIN_EXTRACTED_TEXT) {
+        return NextResponse.json(
+          fail(
+            "PDF_TEXT_TOO_LOW",
+            "This PDF looks scanned/image-based, so we can’t extract text. Please paste the scorecard text, or upload a text-based PDF."
           ),
           { status: 400 }
         );
@@ -152,7 +179,7 @@ export async function POST(req: Request) {
         status: 400,
       });
     }
-  } else if (textInput) {
+  } else if (textInput && textInput.trim()) {
     const parsed = AnalyzeTextSchema.safeParse({ text: textInput });
     if (!parsed.success) {
       return NextResponse.json(
@@ -168,15 +195,14 @@ export async function POST(req: Request) {
 
   rawText = rawText.trim();
   if (!rawText) {
-    return NextResponse.json(
-      fail(
-        "EMPTY_INPUT",
-        sourceType === "image"
-          ? "We couldn’t read that image. Please upload a PDF or paste the text."
-          : "We couldn’t read that input. Please upload a PDF or paste the text."
-      ),
-      { status: 400 }
-    );
+      return NextResponse.json(
+    fail(
+      "EMPTY_INPUT",
+      "We couldn’t read that input. Please upload a PDF or paste the text."
+    ),
+    { status: 400 }
+);
+
   }
 
   textChars = rawText.length;
@@ -185,12 +211,27 @@ export async function POST(req: Request) {
   // --- Run Node engines ---
   const { attempt, exam } = analyzeMock(rawText);
   const insights = buildInsights(attempt);
+  const safeKnown = {
+  score: typeof attempt.known?.score === "number" ? attempt.known.score : 0,
+  sections: Array.isArray(attempt.known?.sections) ? attempt.known.sections : [],
+};
+
+// ensure insights.known exists and is valid
+const insightsSafe = {
+  ...insights,
+  known: {
+    ...(insights as any).known,
+    ...safeKnown,
+  },
+};
+
 
   const inferred = {
-    persona: insights.inferred.persona,
-    riskPatterns: insights.inferred.riskPatterns,
-    confidenceGap: insights.inferred.confidenceGap,
-  };
+  persona: insightsSafe.inferred.persona,
+  riskPatterns: insightsSafe.inferred.riskPatterns,
+  confidenceGap: insightsSafe.inferred.confidenceGap,
+};
+
 
   const missing = [...new Set([...attempt.missing])];
 
@@ -199,12 +240,7 @@ export async function POST(req: Request) {
 
   // --- Memory + strategy selection ---
   const examLabel = exam.detected ?? "agnostic";
-  const memorySummary = await loadMemorySummary(
-    db,
-    userId,
-    examLabel,
-    inferred.persona ?? "steady"
-  );
+  const memorySummary = await loadMemorySummary(db, userId, examLabel, inferred.persona ?? "steady");
 
   const strategy = selectStrategy({
     exam: examLabel,
@@ -222,13 +258,14 @@ export async function POST(req: Request) {
   const nextMockStrategy = buildNextMockStrategy({ ...attempt, inferred, missing });
 
   const recommendation = RecommendationBundleSchema.parse({
-    insights: { ...insights, inferred, missing },
-    nbas,
-    plan,
-    probes,
-    nextMockStrategy,
-    strategy: { id: strategy.id, exam: strategy.exam, persona: strategy.persona },
-  });
+  insights: { ...insightsSafe, inferred, missing },
+  nbas,
+  plan,
+  probes,
+  nextMockStrategy,
+  strategy: { id: strategy.id, exam: strategy.exam, persona: strategy.persona },
+});
+
 
   // --- Persist ---
   const attempts = db.collection(COLLECTIONS.attempts);
@@ -246,7 +283,7 @@ export async function POST(req: Request) {
     exam,
     rawText: normalizedRawText,
     rawTextHash: hashText(rawText),
-    known: attempt.known,
+    known: safeKnown,
     inferred,
     missing,
     artifacts: {
