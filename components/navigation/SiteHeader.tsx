@@ -9,10 +9,13 @@ import { Button } from "@/components/ui/button";
 
 export function SiteHeader() {
   const { data: session, status } = useSession();
+  const authed = status === "authenticated";
+
   const { theme, setTheme } = useTheme();
-  const isAuthed = status === "authenticated";
   const toggleTheme = () => {
-    setTheme(theme === "dark" ? "light" : "dark");
+    // theme can be "light" | "dark" | "system"
+    const t = theme === "system" ? "dark" : theme;
+    setTheme(t === "dark" ? "light" : "dark");
   };
 
   return (
@@ -27,8 +30,10 @@ export function SiteHeader() {
             <p className="text-xs text-muted-foreground">Mock Analyzer</p>
           </div>
         </Link>
+
         <nav className="flex items-center gap-3 text-sm">
-          {isAuthed ? (
+          {/* Nav links */}
+          {authed ? (
             <>
               <Link href="/app" className="text-muted-foreground hover:text-foreground">
                 Dashboard
@@ -39,7 +44,9 @@ export function SiteHeader() {
               <Link href="/account" className="text-muted-foreground hover:text-foreground">
                 Account
               </Link>
+
               <Button
+                type="button"
                 variant="ghost"
                 onClick={() => {
                   if (typeof window !== "undefined") {
@@ -50,16 +57,26 @@ export function SiteHeader() {
                 Help
               </Button>
             </>
-          ) : null}
-          <Button variant="ghost" onClick={toggleTheme} aria-label="Toggle theme">
+          ) : (
+            <Link href="/about" className="text-muted-foreground hover:text-foreground">
+              About
+            </Link>
+          )}
+
+          {/* Theme toggle always visible */}
+          <Button type="button" variant="ghost" onClick={toggleTheme} aria-label="Toggle theme">
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
+
+          {/* Auth button */}
           {status === "loading" ? null : session ? (
-            <Button variant="outline" onClick={() => signOut({ callbackUrl: "/" })}>
+            <Button type="button" variant="outline" onClick={() => signOut({ callbackUrl: "/" })}>
               Sign out
             </Button>
           ) : (
-            <Button onClick={() => signIn("google", { callbackUrl: "/app" })}>Sign in</Button>
+            <Button type="button" onClick={() => signIn("google", { callbackUrl: "/app" })}>
+              Sign in
+            </Button>
           )}
         </nav>
       </div>

@@ -1,4 +1,5 @@
-import { LandingActions } from "@/components/landing/LandingActions";
+import Link from "next/link";
+import { LandingCtas } from "@/components/landing/LandingCtas";
 
 export default function LandingPage() {
   return (
@@ -8,6 +9,7 @@ export default function LandingPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary">
             Cogniverse Mock Analyzer
           </p>
+
           <div className="space-y-4">
             <h1 className="text-4xl font-semibold leading-tight sm:text-5xl">
               Turn every mock into a clear next-step plan.
@@ -16,8 +18,11 @@ export default function LandingPage() {
               Upload a scorecard, review your next best actions, and follow a weekly plan built for your exam goal.
             </p>
           </div>
-          <LandingActions />
+
+          {/* Auth-aware CTAs: logged out -> Google sign-in, logged in -> /app */}
+          <LandingCtas />
         </div>
+
         <div className="surface-card space-y-4 p-6">
           <h2 className="text-xl font-semibold">What you get</h2>
           <ul className="space-y-3 text-sm text-muted-foreground">
@@ -26,6 +31,14 @@ export default function LandingPage() {
             <li>7-day plan with checklist and notes.</li>
             <li>History view for all attempts.</li>
           </ul>
+
+          <div className="pt-2 text-xs text-muted-foreground">
+            By continuing you agree to our{" "}
+            <Link href="/about" className="underline underline-offset-4">
+              About
+            </Link>{" "}
+            page details.
+          </div>
         </div>
       </section>
     </main>
