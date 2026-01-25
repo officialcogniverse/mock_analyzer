@@ -71,12 +71,74 @@ function extractAccuracy(metricValue?: string) {
   return Math.max(0, Math.min(100, value));
 }
 
+type AdaptedReport = {
+  confidence: number;
+  signal_quality: "low" | "medium" | "high";
+  summary: string;
+  primary_bottleneck: string;
+  patterns: Report["patterns"];
+  followups: Report["followups"];
+  probes: Report["probes"];
+  next_actions: Report["next_actions"];
+  plan: Report["plan"];
+  next_mock_strategy: Report["next_mock_strategy"];
+  overall_exam_strategy: Report["overall_exam_strategy"];
+};
+
+function adaptRecommendationToReport(data: any): AdaptedReport | null {
+  // Legacy support
+  if (data?.report) return data.report as AdaptedReport;
+
+  const rec = data?.recommendation;
+  if (!rec) return null;
+
+  const signalQuality = (rec?.insights?.signalQuality ||
+    rec?.insights?.signal_quality ||
+    "medium") as "low" | "medium" | "high";
+
+  return {
+    confidence: Number(rec?.insights?.confidence ?? rec?.insights?.coachConfidence ?? 70),
+    signal_quality: signalQuality,
+    summary:
+      rec?.insights?.summary ??
+      rec?.insights?.headline ??
+      "Your plan is ready. Focus on the actions below to improve your next mock.",
+    primary_bottleneck:
+      rec?.insights?.primaryBottleneck ??
+      rec?.insights?.primary_bottleneck ??
+      rec?.insights?.topIssue ??
+      "Execution & consistency",
+
+    patterns: (rec?.insights?.patterns ?? []) as Report["patterns"],
+    followups: (rec?.insights?.followups ?? []) as Report["followups"],
+    probes: (rec?.insights?.probes ?? []) as Report["probes"],
+
+    next_actions: (rec?.nbas ?? rec?.nextActions ?? []) as Report["next_actions"],
+    plan: (rec?.plan ?? { days: [] }) as Report["plan"],
+
+    next_mock_strategy: (rec?.insights?.nextMockStrategy ?? {
+      rules: [],
+      time_checkpoints: [],
+      skip_policy: [],
+    }) as Report["next_mock_strategy"],
+
+    overall_exam_strategy: (rec?.insights?.overallExamStrategy ?? {
+      weekly_rhythm: [],
+      revision_loop: [],
+      mock_schedule: [],
+    }) as Report["overall_exam_strategy"],
+  };
+}
+
 export default function AttemptReportPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { id } = React.use(params);
   const { data, loading, error, refresh } = useAttempt(id);
+
   const [actionState, setActionState] = useState<ActionState[]>([]);
-  const [history, setHistory] = useState<Array<{ id: string; created_at: string; accuracy_pct: number | null }>>([]);
+  const [history, setHistory] = useState<Array<{ id: string; created_at: string; accuracy_pct: number | null }>>(
+    []
+  );
 
   useEffect(() => {
     if (!data?.action_state) return;
@@ -92,9 +154,16 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
       .then((res) => res.json())
       .then((json) => {
         if (!active) return;
-        const attempts = Array.isArray(json?.attempts) ? json.attempts : [];
+
+        // Support both {attempts: []} and ok({attempts: []})
+        const attempts = Array.isArray(json?.attempts)
+          ? json.attempts
+          : Array.isArray(json?.data?.attempts)
+            ? json.data.attempts
+            : [];
+
         const mapped = attempts.map((row: any) => ({
-          id: String(row.id || ""),
+          id: String(row.id || row._id || ""),
           created_at: String(row.created_at || row.createdAt || ""),
           accuracy_pct: Number.isFinite(Number(row.accuracy_pct)) ? Number(row.accuracy_pct) : null,
         }));
@@ -103,22 +172,25 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
       .catch(() => {
         if (active) setHistory([]);
       });
+
     return () => {
       active = false;
     };
   }, [data?.attempt?.exam]);
 
-  const report = data?.report;
   const attempt = data?.attempt;
   const profile = data?.profile || null;
+
+  const report = useMemo(() => adaptRecommendationToReport(data), [data]);
 
   const stateMap = useMemo(() => new Map(actionState.map((row) => [row.action_id, row])), [actionState]);
 
   const statsRow = useMemo(() => {
     if (!report) return [] as Array<{ label: string; value: string; hint: string }>;
     const risk = riskBand(report.signal_quality);
-    const consistency = consistencyScore(report.next_actions, stateMap);
-    const items = [
+    const consistency = consistencyScore(report.next_actions || [], stateMap);
+
+    const items: Array<{ label: string; value: string; hint: string }> = [
       {
         label: "Confidence",
         value: `${report.confidence}%`,
@@ -130,6 +202,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
         hint: `Signal quality: ${report.signal_quality}`,
       },
     ];
+
     if (consistency !== null) {
       items.push({
         label: "Consistency",
@@ -137,17 +210,17 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
         hint: "Based on action completion",
       });
     }
+
     return items;
   }, [report, stateMap]);
 
-  const limitedSignal = report?.signal_quality === "low" || (report?.confidence ?? 0) < 50;
+  const limitedSignal = report?.signal_quality === "low" || Number(report?.confidence ?? 0) < 50;
 
   const heroGreeting = useMemo(() => {
     const name = profile?.displayName?.trim();
     if (name) return `${name}, here’s your next move.`;
     return "Here’s your next move.";
   }, [profile?.displayName]);
-
 
   const dayOne = report?.plan?.days?.[0];
   const todayTasks = dayOne ? getTodayTasks(dayOne.tasks || [], stateMap) : [];
@@ -168,7 +241,6 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
       })
       .filter(Boolean) as Array<{ id: string; label: string; value: number }>;
   }, [history]);
-
 
   const accuracyMetric = attempt?.metrics?.find((metric: { label: string; value?: string }) =>
     metric.label.toLowerCase().includes("accuracy")
@@ -193,14 +265,13 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
       <main className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-12">
         <EmptyState
           title="Report missing"
-          description={
-            error ||
-            "We could not load this report. Regenerate it from the upload page to restore your plan."
-          }
+          description={error || "We could not load this report. Regenerate it from the upload page to restore your plan."}
           action={
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => router.push("/")}>Regenerate report</Button>
-              <Button variant="outline" onClick={() => router.push("/history")}>History</Button>
+              <Button variant="outline" onClick={() => router.push("/history")}>
+                History
+              </Button>
             </div>
           }
         />
@@ -223,10 +294,16 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
                 description={`Attempt ${attempt.id.slice(-6)} · Uploaded ${uploadedAtLabel}`}
               />
               <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="rounded-full border-indigo-200 bg-indigo-50 text-indigo-700">
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-indigo-200 bg-indigo-50 text-indigo-700"
+                >
                   Confidence {report.confidence}%
                 </Badge>
-                <Badge variant={report.signal_quality === "low" ? "destructive" : "secondary"} className="rounded-full">
+                <Badge
+                  variant={report.signal_quality === "low" ? "destructive" : "secondary"}
+                  className="rounded-full"
+                >
                   Signal {report.signal_quality}
                 </Badge>
               </div>
@@ -238,10 +315,14 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
               <Badge className="rounded-full bg-slate-900 text-white">Primary bottleneck</Badge>
               <span className="text-sm font-medium text-slate-900">{report.primary_bottleneck}</span>
               {profile?.goal ? (
-                <Badge variant="outline" className="rounded-full">Goal: {profile.goal}</Badge>
+                <Badge variant="outline" className="rounded-full">
+                  Goal: {profile.goal}
+                </Badge>
               ) : null}
               {profile?.nextMockDate ? (
-                <Badge variant="outline" className="rounded-full">Next mock: {nextMockDateLabel}</Badge>
+                <Badge variant="outline" className="rounded-full">
+                  Next mock: {nextMockDateLabel}
+                </Badge>
               ) : null}
             </div>
 
@@ -261,7 +342,9 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
               <Button variant="outline" asChild>
                 <Link href="/history">History</Link>
               </Button>
-              <Button variant="ghost" onClick={refresh}>Refresh</Button>
+              <Button variant="ghost" onClick={refresh}>
+                Refresh
+              </Button>
               <Button onClick={() => router.push("/")}>Upload next mock</Button>
             </div>
           </section>
@@ -274,13 +357,13 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
                 </Badge>
                 <p className="font-medium">We are still giving you a full baseline plan.</p>
               </div>
-              {report.followups.length ? (
+              {(report.followups || []).length ? (
                 <div className="mt-3 space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/80">
                     Quick follow-ups to sharpen your next report
                   </p>
                   <ul className="list-disc space-y-1 pl-5 text-amber-900/90">
-                    {report.followups.map((followup: ReportFollowup) => (
+                    {(report.followups || []).map((followup: ReportFollowup) => (
                       <li key={followup.id}>
                         {followup.question}
                         {followup.type === "single" && followup.options?.length
@@ -330,7 +413,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
               description="Treat these as the root causes. The plan below is built to counter them."
             />
             <div className="grid gap-4">
-              {report.patterns.slice(0, 6).map((pattern: Report["patterns"][number], index) => (
+              {(report.patterns || []).slice(0, 6).map((pattern: Report["patterns"][number], index: number) => (
                 <PatternCard key={pattern.id} pattern={pattern} index={index} />
               ))}
             </div>
@@ -344,7 +427,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
             />
             <ActionChecklist
               attemptId={attempt.id}
-              actions={report.next_actions}
+              actions={report.next_actions || []}
               state={actionState}
               onStateChange={setActionState}
             />
@@ -353,11 +436,11 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
           <section className="space-y-3">
             <SectionHeader
               eyebrow="Day-wise plan"
-              title={`${report.plan.days.length}-day plan before the next mock`}
+              title={`${(report.plan?.days || []).length}-day plan before the next mock`}
               description="Each day is designed to reinforce the same decision rules until they stick."
             />
             <div className="grid gap-3">
-              {report.plan.days.map((day: Report["plan"]["days"][number]) => (
+              {(report.plan?.days || []).map((day: Report["plan"]["days"][number]) => (
                 <div key={day.day_index} className="rounded-2xl border bg-white p-4 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -386,9 +469,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
                             <p className="font-medium text-slate-900">{task.title}</p>
                             <span className="text-xs text-muted-foreground">{task.duration_min}m</span>
                           </div>
-                          {task.note ? (
-                            <p className="mt-1 text-xs text-muted-foreground">{task.note}</p>
-                          ) : null}
+                          {task.note ? <p className="mt-1 text-xs text-muted-foreground">{task.note}</p> : null}
                         </div>
                       );
                     })}
@@ -405,7 +486,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
               description="Run these probes to confirm the bottleneck is actually shrinking."
             />
             <div className="grid gap-3 md:grid-cols-2">
-              {report.probes.map((probe: Report["probes"][number]) => (
+              {(report.probes || []).map((probe: Report["probes"][number]) => (
                 <div key={probe.id} className="rounded-2xl border bg-white p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-900">{probe.title}</p>
@@ -430,31 +511,25 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
             />
             <div className="grid gap-3 lg:grid-cols-3">
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Rules
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rules</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-900">
-                  {report.next_mock_strategy.rules.map((rule, idx) => (
+                  {(report.next_mock_strategy?.rules || []).map((rule: string, idx: number) => (
                     <li key={`rule-${idx}`}>{rule}</li>
                   ))}
                 </ul>
               </div>
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Time checkpoints
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Time checkpoints</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-900">
-                  {report.next_mock_strategy.time_checkpoints.map((checkpoint, idx) => (
+                  {(report.next_mock_strategy?.time_checkpoints || []).map((checkpoint: string, idx: number) => (
                     <li key={`checkpoint-${idx}`}>{checkpoint}</li>
                   ))}
                 </ul>
               </div>
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Skip policy
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Skip policy</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-900">
-                  {report.next_mock_strategy.skip_policy.map((rule, idx) => (
+                  {(report.next_mock_strategy?.skip_policy || []).map((rule: string, idx: number) => (
                     <li key={`skip-${idx}`}>{rule}</li>
                   ))}
                 </ul>
@@ -470,31 +545,25 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
             />
             <div className="grid gap-3 lg:grid-cols-3">
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Weekly rhythm
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Weekly rhythm</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-900">
-                  {report.overall_exam_strategy.weekly_rhythm.map((item, idx) => (
+                  {(report.overall_exam_strategy?.weekly_rhythm || []).map((item: string, idx: number) => (
                     <li key={`weekly-${idx}`}>{item}</li>
                   ))}
                 </ul>
               </div>
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Revision loop
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Revision loop</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-900">
-                  {report.overall_exam_strategy.revision_loop.map((item, idx) => (
+                  {(report.overall_exam_strategy?.revision_loop || []).map((item: string, idx: number) => (
                     <li key={`revision-${idx}`}>{item}</li>
                   ))}
                 </ul>
               </div>
               <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Mock schedule
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Mock schedule</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-900">
-                  {report.overall_exam_strategy.mock_schedule.map((item, idx) => (
+                  {(report.overall_exam_strategy?.mock_schedule || []).map((item: string, idx: number) => (
                     <li key={`mock-${idx}`}>{item}</li>
                   ))}
                 </ul>
@@ -508,12 +577,12 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
               title="What changed since the last attempt"
               description="Use delta to verify that your actions are actually shifting outcomes."
             />
-            {data.delta_from_previous ? (
+            {data?.delta_from_previous ? (
               <div className="rounded-3xl border bg-white p-6 space-y-3 shadow-sm">
                 <p className="text-sm text-slate-900">{data.delta_from_previous.summary}</p>
                 {data.delta_from_previous.changes.length ? (
                   <ul className="list-disc space-y-1 pl-5 text-sm text-slate-900">
-                    {data.delta_from_previous.changes.map((change, idx) => (
+                    {data.delta_from_previous.changes.map((change: string, idx: number) => (
                       <li key={`delta-${idx}`}>{change}</li>
                     ))}
                   </ul>
@@ -541,7 +610,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
                 <p className="text-xs text-muted-foreground">Derived from Day 1 of your plan.</p>
               </div>
               <Badge variant="outline" className="rounded-full">
-                {todayTasks.reduce((sum, task) => sum + task.duration, 0)} min
+                {todayTasks.reduce((sum, task) => sum + (task.duration || 0), 0)} min
               </Badge>
             </div>
             <div className="mt-3 space-y-2">
@@ -558,9 +627,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
                       <p className="font-medium text-slate-900">{task.title}</p>
                       <span className="text-xs text-muted-foreground">{task.duration}m</span>
                     </div>
-                    {task.note ? (
-                      <p className="mt-1 text-xs text-muted-foreground">{task.note}</p>
-                    ) : null}
+                    {task.note ? <p className="mt-1 text-xs text-muted-foreground">{task.note}</p> : null}
                   </div>
                 ))
               ) : (
@@ -573,7 +640,7 @@ export default function AttemptReportPage({ params }: { params: Promise<{ id: st
 
           <ActionChecklist
             attemptId={attempt.id}
-            actions={report.next_actions}
+            actions={report.next_actions || []}
             state={actionState}
             onStateChange={setActionState}
             title="Action rail"

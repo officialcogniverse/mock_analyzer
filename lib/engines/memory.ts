@@ -1,5 +1,4 @@
 import type { Db } from "mongodb";
-
 import { COLLECTIONS } from "@/lib/db";
 
 type MemoryTuple = {
@@ -31,33 +30,46 @@ export async function loadMemorySummary(db: Db, userId: string, exam: string, pe
     .limit(3)
     .toArray();
 
-  const avoidStrategies = tuples.filter((tuple) => tuple.stats.lastOutcome === "bad").map((tuple) => tuple.strategy);
+  const avoidStrategies = tuples
+    .filter((tuple) => tuple.stats?.lastOutcome === "bad")
+    .map((tuple) => tuple.strategy);
+
   return { tuples, avoidStrategies };
 }
 
 export function selectStrategy(params: { exam: string; persona: string; avoidStrategies: string[] }): StrategyContext {
   const { exam, persona, avoidStrategies } = params;
-  const base = persona === "speed-first" ? "speed_stabilize" : persona === "accuracy-first" ? "accuracy_rebuild" : "steady_rebuild";
+
+  const base =
+    persona === "speed-first"
+      ? "speed_stabilize"
+      : persona === "accuracy-first"
+        ? "accuracy_rebuild"
+        : "steady_rebuild";
+
   const candidates: StrategyContext[] = [
     { id: `${base}_7d`, exam, persona, horizonDays: 7 },
     { id: `${base}_14d`, exam, persona, horizonDays: 14 },
   ];
-  const selected = candidates.find((strategy) => !avoidStrategies.includes(strategy.id)) ?? candidates[0];
-  return selected;
+
+  return candidates.find((s) => !avoidStrategies.includes(s.id)) ?? candidates[0];
 }
 
 export async function recordStrategyUsage(db: Db, userId: string, strategy: StrategyContext) {
   const tuples = db.collection<MemoryTuple>(COLLECTIONS.memoryTuples);
   const now = new Date();
+
   await tuples.updateOne(
     { userId, exam: strategy.exam, persona: strategy.persona, strategy: strategy.id },
     {
       $setOnInsert: {
-        stats: {
-          seen: 0,
-          completedPlans: 0,
-          avgCompletionRate: 0,
-        },
+        userId,
+        exam: strategy.exam,
+        persona: strategy.persona,
+        strategy: strategy.id,
+        "stats.completedPlans": 0,
+        "stats.avgCompletionRate": 0,
+        // DO NOT set stats.seen here
       },
       $set: { lastUsedAt: now },
       $inc: { "stats.seen": 1 },
@@ -65,3 +77,5 @@ export async function recordStrategyUsage(db: Db, userId: string, strategy: Stra
     { upsert: true }
   );
 }
+
+

@@ -300,17 +300,26 @@ export default function LandingPage() {
         body: form,
       });
 
-      const data = await res.json();
+      const json = await res.json();
 
       if (!res.ok) {
-        toast.error(formatAnalyzeError(data?.error));
+        const msg = json?.error?.message || json?.error || json?.message;
+        toast.error(formatAnalyzeError(msg));
         return;
       }
 
-      const reportId = data?.id ?? data?.attempt?._id ?? data?.attempt?.id;
+      // IMPORTANT: your API wraps payload in ok({ ... }) => { ok: true, data: { id, ... } }
+      const reportId =
+        json?.data?.id ??
+        json?.data?.attempt?._id ??
+        json?.data?.attempt?._id?.toString?.() ??
+        json?.data?.attempt?.id;
+
       if (!reportId) {
-        throw new Error("Missing report id.");
+        console.error("Analyze response missing id:", json);
+        throw new Error("Missing report id from /api/analyze response.");
       }
+
 
       try {
         if (typeof window !== "undefined") {
@@ -319,10 +328,10 @@ export default function LandingPage() {
         }
       } catch {}
 
-      await trackEvent("generate_plan", { attemptId: reportId });
+      await trackEvent("generate_plan", { attemptId: String(reportId) });
 
       toast.success("Report ready 🚀");
-      router.push(`/report/${reportId}`);
+      router.push(`/report/${String(reportId)}`);
     } catch {
       toast.error(formatAnalyzeError());
     } finally {

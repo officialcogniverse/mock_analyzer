@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
 import { Moon, Sun } from "lucide-react";
@@ -14,11 +15,18 @@ export function SiteHeader() {
     (session?.user?.email ? session.user.email.trim().toLowerCase() : undefined);
   const authed = Boolean(userId);
 
-  const { theme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
+
+  // Prevent hydration mismatch: theme is unknown on server, known on client after mount
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // resolvedTheme turns "system" into "light" | "dark"
+  const currentTheme = useMemo(() => resolvedTheme ?? theme, [resolvedTheme, theme]);
+
   const toggleTheme = () => {
-    // theme can be "light" | "dark" | "system"
-    const t = theme === "system" ? "dark" : theme;
-    setTheme(t === "dark" ? "light" : "dark");
+    const t = currentTheme === "dark" ? "light" : "dark";
+    setTheme(t);
   };
 
   return (
@@ -51,11 +59,7 @@ export function SiteHeader() {
               <Button
                 type="button"
                 variant="ghost"
-                onClick={() => {
-                  if (typeof window !== "undefined") {
-                    window.dispatchEvent(new Event("open-bot-widget"));
-                  }
-                }}
+                onClick={() => window.dispatchEvent(new Event("open-bot-widget"))}
               >
                 Help
               </Button>
@@ -71,9 +75,17 @@ export function SiteHeader() {
             </>
           )}
 
-          {/* Theme toggle always visible */}
+          {/* Theme toggle always visible (hydration-safe) */}
           <Button type="button" variant="ghost" onClick={toggleTheme} aria-label="Toggle theme">
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            {mounted ? (
+              currentTheme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )
+            ) : (
+              <span className="h-4 w-4" />
+            )}
           </Button>
 
           {/* Auth button */}

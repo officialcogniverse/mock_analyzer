@@ -30,11 +30,24 @@ function hashText(text: string) {
 
 export const runtime = "nodejs";
 
+function isPdfParseXrefError(err: unknown) {
+  const msg =
+    (err instanceof Error ? err.message : typeof err === "string" ? err : "")?.toString() || "";
+  // pdf.js / pdf-parse commonly emits these
+  return (
+    msg.toLowerCase().includes("bad xref") ||
+    msg.toLowerCase().includes("xref") ||
+    msg.toLowerCase().includes("formaterror")
+  );
+}
+
 export async function POST(req: Request) {
+  // --- Auth / Session resolution ---
   const session = await getServerSession(authOptions);
   const userId = getSessionUserId(session);
   const fallbackSession = userId ? null : ensureSession(req);
   const resolvedUserId = userId || fallbackSession?.userId;
+
   if (!resolvedUserId) {
     return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
   }
@@ -45,6 +58,7 @@ export async function POST(req: Request) {
     return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });
   }
 
+  // --- Input validation ---
   const contentType = req.headers.get("content-type") || "";
   if (!contentType.includes("multipart/form-data")) {
     return NextResponse.json(fail("INVALID_REQUEST", "Expected multipart/form-data."), { status: 400 });
@@ -59,6 +73,7 @@ export async function POST(req: Request) {
       : filesEntry.find((entry): entry is File => entry instanceof File) ?? null;
   const textInput = form.get("text")?.toString() ?? "";
 
+  // --- Extract text ---
   let rawText = "";
   let sourceType: "pdf" | "image" | "text" = "text";
   let filename: string | null = null;
@@ -68,22 +83,42 @@ export async function POST(req: Request) {
 
   if (file) {
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      return NextResponse.json(
-        fail("FILE_TOO_LARGE", "File exceeds 8MB limit."),
-        { status: 400 }
-      );
+      return NextResponse.json(fail("FILE_TOO_LARGE", "File exceeds 8MB limit."), { status: 400 });
     }
+
     filename = file.name;
     const buffer = Buffer.from(await file.arrayBuffer());
+
     if (file.type === "application/pdf") {
       sourceType = "pdf";
-      rawText = await extractTextFromPdf(buffer);
+      try {
+        rawText = await extractTextFromPdf(buffer);
+      } catch (err) {
+        // IMPORTANT: do not 500 on bad PDFs; return actionable 400
+        const xref = isPdfParseXrefError(err);
+        extractionNotes = xref
+          ? "PDF parsing failed (bad cross-reference table). This can happen with certain generated/scanned PDFs."
+          : "PDF parsing failed.";
+        return NextResponse.json(
+          fail(
+            "PDF_PARSE_FAILED",
+            xref
+              ? "This PDF can’t be read (corrupted/unsupported structure). Try exporting it again, uploading a different PDF, or paste the text instead."
+              : "We couldn’t read that PDF. Try a different PDF or paste the text."
+          ),
+          { status: 400 }
+        );
+      }
     } else if (["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
       sourceType = "image";
       rawText = await extractTextFromImages([{ mime: file.type, data: buffer }]);
       if (!rawText) {
         missingFromInput.push("image_ocr_not_available");
         extractionNotes = "Image OCR is unavailable; ask user to paste text or upload PDF.";
+        return NextResponse.json(
+          fail("EMPTY_INPUT", "We couldn’t read that image. Please upload a PDF or paste the text."),
+          { status: 400 }
+        );
       }
     } else {
       return NextResponse.json(fail("UNSUPPORTED_FILE", "Only PDF or image uploads are supported."), {
@@ -116,21 +151,26 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+
   textChars = rawText.length;
   const normalizedRawText = rawText.slice(0, MAX_RAWTEXT_LENGTH);
 
+  // --- Run Node engines ---
   const { attempt, exam } = analyzeMock(rawText);
   const insights = buildInsights(attempt);
+
   const inferred = {
     persona: insights.inferred.persona,
     riskPatterns: insights.inferred.riskPatterns,
     confidenceGap: insights.inferred.confidenceGap,
   };
+
   const missing = [...new Set([...attempt.missing, ...missingFromInput])];
 
   const db = await getDb();
   await ensureIndexes(db);
 
+  // --- Memory + strategy selection ---
   const examLabel = exam.detected ?? "agnostic";
   const memorySummary = await loadMemorySummary(
     db,
@@ -138,6 +178,7 @@ export async function POST(req: Request) {
     examLabel,
     inferred.persona ?? "steady"
   );
+
   const strategy = selectStrategy({
     exam: examLabel,
     persona: inferred.persona ?? "steady",
@@ -148,6 +189,7 @@ export async function POST(req: Request) {
     attempt: { ...attempt, inferred, missing },
     strategy,
   });
+
   const plan = buildPlan(nbas, strategy.horizonDays);
 
   const recommendation = RecommendationBundleSchema.parse({
@@ -157,6 +199,7 @@ export async function POST(req: Request) {
     strategy: { id: strategy.id, exam: strategy.exam, persona: strategy.persona },
   });
 
+  // --- Persist ---
   const attempts = db.collection(COLLECTIONS.attempts);
   const recommendations = db.collection(COLLECTIONS.recommendations);
 
@@ -179,6 +222,7 @@ export async function POST(req: Request) {
       notes: extractionNotes,
     },
   };
+
   const attemptResult = await attempts.insertOne(attemptDoc);
 
   const recommendationDoc = {
@@ -190,10 +234,12 @@ export async function POST(req: Request) {
     plan: recommendation.plan,
     strategy: recommendation.strategy,
   };
+
   const recommendationResult = await recommendations.insertOne(recommendationDoc);
 
   await recordStrategyUsage(db, resolvedUserId, strategy);
 
+  // --- Response ---
   const res = NextResponse.json(
     ok({
       id: attemptResult.insertedId.toString(),
@@ -214,8 +260,10 @@ export async function POST(req: Request) {
       recentEvents: [],
     })
   );
+
   if (fallbackSession?.isNew) {
     attachSessionCookie(res, fallbackSession);
   }
+
   return res;
 }
