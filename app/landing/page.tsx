@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { ensureSession } from "@/lib/userClient";
 import { NextBestActionRail } from "@/components/next-best-action-rail";
@@ -113,17 +111,6 @@ export default function LandingPage() {
   const [profileStruggle, setProfileStruggle] = useState("");
   const [profileTimezone, setProfileTimezone] = useState("Asia/Kolkata");
   const [profileSaving, setProfileSaving] = useState(false);
-  const [signInOpen, setSignInOpen] = useState(false);
-  const [signInName, setSignInName] = useState("");
-  const [signInExam, setSignInExam] = useState("");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authCode, setAuthCode] = useState("");
-  const [devOtp, setDevOtp] = useState("");
-  const [otpSending, setOtpSending] = useState(false);
-  const [otpVerifying, setOtpVerifying] = useState(false);
-  const [authMode, setAuthMode] = useState<"student" | "institute">("student");
-  const [instituteCode, setInstituteCode] = useState("");
-  const [instituteName, setInstituteName] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -158,9 +145,6 @@ export default function LandingPage() {
         );
         setProfileStruggle(u?.profile?.biggestStruggle || "");
         setProfileTimezone(u?.profile?.timezone || "Asia/Kolkata");
-        setSignInName(u?.displayName || "");
-        setSignInExam(u?.examDefault || "");
-        setAuthEmail(u?.auth?.email || "");
       })
       .catch(() => {
         if (active) setUser(null);
@@ -170,8 +154,6 @@ export default function LandingPage() {
       active = false;
     };
   }, [sessionReady]);
-
-  const [step, setStep] = useState(1);
 
   const [examLabel, setExamLabel] = useState("");
   const [goal, setGoal] = useState<GoalUI>("percentile");
@@ -210,29 +192,25 @@ export default function LandingPage() {
     } catch {}
   }, []);
 
-  const progress = useMemo(() => (step / 2) * 100, [step]);
-
-  const displayName = user?.displayName || profileName || "Cogniverse Student";
-  const examDefault = user?.examDefault || signInExam;
-
-  const canGoNext = useMemo(() => {
-    if (step === 1) return !!struggle && !!nextMockDate && !!dailyMinutes;
-    if (step === 2) return true;
-    return false;
-  }, [step, struggle, nextMockDate, dailyMinutes]);
-
   const hasManualSignals =
     !!manualMetrics.totalScore ||
     !!manualMetrics.accuracy ||
     !!manualMetrics.attempts ||
     !!manualMetrics.weakAreas;
 
+  const hasInput = useMemo(
+    () => text.trim().length > 20 || files.length > 0 || hasManualSignals,
+    [text, files, hasManualSignals]
+  );
+  const currentStep = hasInput ? 2 : 1;
+  const progress = currentStep === 2 ? 100 : 50;
+
+  const displayName = user?.displayName || profileName || "Cogniverse Student";
+  const examDefault = user?.examDefault || profileTargetExam || examLabel || "";
+
   const canAnalyze = useMemo(() => {
-    return (
-      !!struggle &&
-      (text.trim().length > 20 || files.length > 0 || hasManualSignals)
-    );
-  }, [struggle, text, files, hasManualSignals]);
+    return !!struggle && hasInput;
+  }, [struggle, hasInput]);
 
   const choiceBtn = (active: boolean) => (active ? "default" : "outline");
 
@@ -270,113 +248,6 @@ export default function LandingPage() {
     }
   }
 
-  async function signIn() {
-    if (!authEmail || !authCode) {
-      toast.error("Enter email + OTP to continue.");
-      return;
-    }
-    if (authMode === "institute" && !instituteCode.trim()) {
-      toast.error("Institute code is required for institute login.");
-      return;
-    }
-    if (!sessionReady) {
-      toast.error("Session not ready. Please refresh once.");
-      return;
-    }
-    setOtpVerifying(true);
-    try {
-      const res = await fetch("/api/auth/otp", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "verify",
-          email: authEmail,
-          code: authCode,
-          mode: authMode,
-          instituteCode: instituteCode || undefined,
-          instituteName: instituteName || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "OTP verification failed");
-
-      const profileRes = await fetch("/api/user", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          displayName: signInName,
-          examDefault: signInExam,
-          profile: {
-            displayName: signInName,
-            targetExamLabel: signInExam || profileTargetExam || null,
-            goal: profileGoal,
-            nextMockDate: profileNextMockDate || null,
-            dailyStudyMinutes: Number(profileDailyMinutes) || null,
-            biggestStruggle: profileStruggle || null,
-            timezone: profileTimezone || "Asia/Kolkata",
-          },
-        }),
-      });
-      const profileData = await profileRes.json();
-      if (!profileRes.ok) throw new Error(profileData?.error || "Profile update failed");
-
-      const nextUser = profileData.user || data.user || null;
-      setUser(nextUser);
-      setProfileName(nextUser?.displayName || nextUser?.profile?.displayName || "");
-      setProfileGoal((nextUser?.profile?.goal as GoalApi) || profileGoal);
-      setProfileTargetExam(nextUser?.profile?.targetExamLabel || signInExam || "");
-      setProfileNextMockDate(nextUser?.profile?.nextMockDate || profileNextMockDate);
-      setProfileDailyMinutes(
-        nextUser?.profile?.dailyStudyMinutes ? String(nextUser.profile.dailyStudyMinutes) : profileDailyMinutes
-      );
-      setProfileStruggle(nextUser?.profile?.biggestStruggle || profileStruggle);
-      setProfileTimezone(nextUser?.profile?.timezone || profileTimezone);
-      setSignInOpen(false);
-      toast.success("Signed in ✅");
-      router.push(authMode === "institute" ? "/institute" : "/history");
-    } catch (error: any) {
-      toast.error(error?.message || "Sign-in failed");
-    } finally {
-      setOtpVerifying(false);
-    }
-  }
-
-  async function sendOtp() {
-    if (!authEmail) {
-      toast.error("Enter your email first.");
-      return;
-    }
-    if (authMode === "institute" && !instituteCode.trim()) {
-      toast.error("Enter your institute code first.");
-      return;
-    }
-    if (!sessionReady) {
-      toast.error("Session not ready. Please refresh once.");
-      return;
-    }
-    setOtpSending(true);
-    try {
-      const res = await fetch("/api/auth/otp", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "send",
-          email: authEmail,
-          mode: authMode,
-          instituteCode: instituteCode || undefined,
-          instituteName: instituteName || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to send OTP");
-      setDevOtp(data?.devCode || "");
-      toast.success("OTP sent ✅ (check email or dev code)");
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to send OTP");
-    } finally {
-      setOtpSending(false);
-    }
-  }
 
   async function onAnalyze() {
     if (!canAnalyze || !goal || !struggle) return;
@@ -405,7 +276,7 @@ export default function LandingPage() {
       if (trimmed) form.append("text", trimmed);
 
       if (files.length) {
-        files.forEach((f) => form.append("files", f));
+        form.append("file", files[0]);
       }
 
       const manualPayload = {
@@ -416,7 +287,7 @@ export default function LandingPage() {
       };
       form.append("manual", JSON.stringify(manualPayload));
 
-      await trackEvent("attempt_uploaded", {
+      await trackEvent("upload_attempt", {
         metadata: {
           hasText: Boolean(trimmed),
           filesCount: files.length,
@@ -436,17 +307,22 @@ export default function LandingPage() {
         return;
       }
 
+      const reportId = data?.id ?? data?.attempt?._id ?? data?.attempt?.id;
+      if (!reportId) {
+        throw new Error("Missing report id.");
+      }
+
       try {
-        if (typeof window !== "undefined" && data?.id) {
-          localStorage.setItem("cogniverse_last_report_id", String(data.id));
-          setLastReportId(String(data.id));
+        if (typeof window !== "undefined") {
+          localStorage.setItem("cogniverse_last_report_id", String(reportId));
+          setLastReportId(String(reportId));
         }
       } catch {}
 
-      await trackEvent("report_generated", { attemptId: data.id });
+      await trackEvent("generate_plan", { attemptId: reportId });
 
       toast.success("Report ready 🚀");
-      router.push(`/report/${data.id}`);
+      router.push(`/report/${reportId}`);
     } catch {
       toast.error(formatAnalyzeError());
     } finally {
@@ -458,155 +334,6 @@ export default function LandingPage() {
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 py-8 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-8">
-          <nav className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-sm font-semibold text-white">
-                CV
-              </div>
-              <div>
-                <p className="text-lg font-semibold text-slate-900">Cogniverse</p>
-                <p className="text-xs text-muted-foreground">
-                  Mock analyzer for focused, student-first plans
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <Button variant="ghost" asChild>
-                <Link href="/history">History</Link>
-              </Button>
-              <Button variant="ghost" asChild>
-                <Link href="/institute">Institute</Link>
-              </Button>
-              <Button variant="ghost" asChild>
-                <Link href="/account">Account</Link>
-              </Button>
-              <Button variant="ghost" asChild>
-                <Link href="/trust">Trust</Link>
-              </Button>
-              <Button variant="ghost" asChild>
-                <Link href="/onboarding">Onboarding</Link>
-              </Button>
-              <Button variant="ghost" asChild>
-                <Link href="/settings">Settings</Link>
-              </Button>
-              <Button variant="ghost" onClick={() => router.push("/report/sample")}>
-                Sample report
-              </Button>
-              <Dialog open={signInOpen} onOpenChange={setSignInOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">Sign in</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Sign in to sync your progress</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <div className="text-sm font-medium">I am signing in as</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          type="button"
-                          variant={authMode === "student" ? "default" : "outline"}
-                          onClick={() => setAuthMode("student")}
-                        >
-                          Student
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={authMode === "institute" ? "default" : "outline"}
-                          onClick={() => setAuthMode("institute")}
-                        >
-                          Institute
-                        </Button>
-                      </div>
-                    </div>
-                    {authMode === "institute" ? (
-                      <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <div className="space-y-1">
-                          <div className="text-sm font-medium">Institute code</div>
-                          <Input
-                            value={instituteCode}
-                            onChange={(e) => setInstituteCode(e.target.value)}
-                            placeholder="fitjee-north-delhi"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <div className="text-sm font-medium">Institute name (admin only)</div>
-                          <Input
-                            value={instituteName}
-                            onChange={(e) => setInstituteName(e.target.value)}
-                            placeholder="FITJEE North Delhi"
-                          />
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          The same analyzer engine powers both student and institute workflows.
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="space-y-1">
-                      <div className="text-sm font-medium">Email address</div>
-                      <Input
-                        value={authEmail}
-                        onChange={(e) => setAuthEmail(e.target.value)}
-                        placeholder="student@cogniverse.ai"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-sm font-medium">One-time passcode</div>
-                      <div className="flex gap-2">
-                        <Input
-                          value={authCode}
-                          onChange={(e) => setAuthCode(e.target.value)}
-                          placeholder="6-digit code"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={sendOtp}
-                          disabled={otpSending}
-                        >
-                          {otpSending ? "Sending..." : "Send code"}
-                        </Button>
-                      </div>
-                      {devOtp ? (
-                        <div className="text-xs text-muted-foreground">
-                          Dev OTP: <span className="font-medium">{devOtp}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-sm font-medium">Your name</div>
-                      <Input
-                        value={signInName}
-                        onChange={(e) => setSignInName(e.target.value)}
-                        placeholder="e.g., Cogniverse Student"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-sm font-medium">Default exam metadata</div>
-                      <Input
-                        value={signInExam}
-                        onChange={(e) => setSignInExam(e.target.value)}
-                        placeholder="CAT / Semester 3 / Mock A"
-                      />
-                    </div>
-                    <Button
-                      className="w-full"
-                      onClick={signIn}
-                      disabled={otpVerifying}
-                      type="button"
-                    >
-                      {otpVerifying ? "Verifying..." : "Continue"}
-                    </Button>
-                    <div className="text-xs text-muted-foreground">
-                      OTP sign-in keeps your history synced across devices.
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </nav>
-
           <section className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="space-y-6">
               <Badge className="w-fit bg-indigo-100 text-indigo-700 hover:bg-indigo-100">
@@ -622,11 +349,10 @@ export default function LandingPage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
-                <Button className="gap-2" onClick={() => setStep(2)}>
-                  Analyze my mock <ArrowRight className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" onClick={() => router.push("/report/sample")}>
-                  Preview report
+                <Button className="gap-2" asChild>
+                  <a href="#analyze">
+                    Analyze my mock <ArrowRight className="h-4 w-4" />
+                  </a>
                 </Button>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -660,16 +386,11 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <Card className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <Card id="analyze" className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <CardContent className="space-y-6 p-6">
                 <SectionHeader
                   title="Analyze a mock"
                   description="Two quick steps. We’ll handle the rest."
-                  action={
-                    <Button variant="ghost" size="sm" onClick={() => setStep(1)}>
-                      Start over
-                    </Button>
-                  }
                 />
 
                 {showOnboarding ? (
@@ -702,7 +423,7 @@ export default function LandingPage() {
                 <div className="space-y-2">
                   <Progress value={progress} />
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Step {step} of 2</span>
+                    <span>Step {currentStep} of 2</span>
                     <span className="flex items-center gap-2">
                       <CalendarClock className="h-4 w-4" />
                       Est. 3 min setup
@@ -710,375 +431,373 @@ export default function LandingPage() {
                   </div>
                 </div>
 
-                {step === 1 && (
-                  <div className="space-y-5">
-                    <div className="space-y-3">
-                      <h3 className="text-base font-semibold flex items-center gap-2">
-                        <Target className="w-5 h-5" /> Exam metadata (optional)
-                      </h3>
+                <div className="space-y-5">
+                  <div className="space-y-3">
+                    <h3 className="flex items-center gap-2 text-base font-semibold">
+                      <Target className="h-5 w-5" /> Exam metadata (optional)
+                    </h3>
+                    <Input
+                      value={examLabel}
+                      onChange={(e) => setExamLabel(e.target.value)}
+                      placeholder="CAT / JEE / Semester 3 / Mock A"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This is used only as metadata so reports stay exam-agnostic.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="flex items-center gap-2 text-base font-semibold">
+                      <Clock className="h-5 w-5" /> Biggest struggle right now
+                    </h3>
+                    <div className="grid gap-2">
+                      <Button
+                        variant={choiceBtn(struggle === "selection")}
+                        onClick={() => setStruggle("selection")}
+                      >
+                        Poor question selection
+                      </Button>
+                      <Button
+                        variant={choiceBtn(struggle === "time")}
+                        onClick={() => setStruggle("time")}
+                      >
+                        Time pressure
+                      </Button>
+                      <Button
+                        variant={choiceBtn(struggle === "concepts")}
+                        onClick={() => setStruggle("concepts")}
+                      >
+                        Concept gaps
+                      </Button>
+                      <Button
+                        variant={choiceBtn(struggle === "careless")}
+                        onClick={() => setStruggle("careless")}
+                      >
+                        Silly mistakes
+                      </Button>
+                      <Button
+                        variant={choiceBtn(struggle === "anxiety")}
+                        onClick={() => setStruggle("anxiety")}
+                      >
+                        Anxiety / panic
+                      </Button>
+                      <Button
+                        variant={choiceBtn(struggle === "consistency")}
+                        onClick={() => setStruggle("consistency")}
+                      >
+                        Consistency / momentum dips
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        Next mock date
+                      </label>
                       <Input
-                        value={examLabel}
-                        onChange={(e) => setExamLabel(e.target.value)}
-                        placeholder="CAT / JEE / Semester 3 / Mock A"
+                        value={nextMockDate}
+                        onChange={(e) => setNextMockDate(e.target.value)}
+                        placeholder="e.g. 12 Oct or next Sunday"
                       />
-                      <p className="text-xs text-muted-foreground">
-                        This is used only as metadata so reports stay exam-agnostic.
-                      </p>
                     </div>
-
-                    <div className="space-y-3">
-                      <h3 className="text-base font-semibold flex items-center gap-2">
-                        <Clock className="w-5 h-5" /> Biggest struggle right now
-                      </h3>
-                      <div className="grid gap-2">
-                        <Button
-                          variant={choiceBtn(struggle === "selection")}
-                          onClick={() => setStruggle("selection")}
-                        >
-                          Poor question selection
-                        </Button>
-                        <Button
-                          variant={choiceBtn(struggle === "time")}
-                          onClick={() => setStruggle("time")}
-                        >
-                          Time pressure
-                        </Button>
-                        <Button
-                          variant={choiceBtn(struggle === "concepts")}
-                          onClick={() => setStruggle("concepts")}
-                        >
-                          Concept gaps
-                        </Button>
-                        <Button
-                          variant={choiceBtn(struggle === "careless")}
-                          onClick={() => setStruggle("careless")}
-                        >
-                          Silly mistakes
-                        </Button>
-                        <Button
-                          variant={choiceBtn(struggle === "anxiety")}
-                          onClick={() => setStruggle("anxiety")}
-                        >
-                          Anxiety / panic
-                        </Button>
-                        <Button
-                          variant={choiceBtn(struggle === "consistency")}
-                          onClick={() => setStruggle("consistency")}
-                        >
-                          Consistency / momentum dips
-                        </Button>
-                      </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        Daily study minutes
+                      </label>
+                      <Input
+                        value={dailyMinutes}
+                        onChange={(e) => setDailyMinutes(e.target.value)}
+                        placeholder="45"
+                      />
                     </div>
+                  </div>
 
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <label className="text-xs font-medium text-muted-foreground">
-                          Next mock date
-                        </label>
-                        <Input
-                          value={nextMockDate}
-                          onChange={(e) => setNextMockDate(e.target.value)}
-                          placeholder="e.g. 12 Oct or next Sunday"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-medium text-muted-foreground">
-                          Daily study minutes
-                        </label>
-                        <Input
-                          value={dailyMinutes}
-                          onChange={(e) => setDailyMinutes(e.target.value)}
-                          placeholder="45"
-                        />
-                      </div>
-                    </div>
-
-                    <details className="rounded-xl border bg-slate-50/70 p-4">
-                      <summary className="cursor-pointer text-sm font-medium text-slate-900">
-                        Advanced context (optional)
-                      </summary>
-                      <div className="mt-4 space-y-4">
-                        <div className="space-y-3">
-                          <h4 className="text-sm font-semibold text-slate-900">
-                            Goal focus
-                          </h4>
-                          <div className="grid gap-2">
-                            <Button
-                              variant={choiceBtn(goal === "percentile")}
-                              onClick={() => setGoal("percentile")}
-                            >
-                              Improve score percentile 🚀
-                            </Button>
-                            <Button
-                              variant={choiceBtn(goal === "accuracy")}
-                              onClick={() => setGoal("accuracy")}
-                            >
-                              Improve accuracy 🎯
-                            </Button>
-                            <Button
-                              variant={choiceBtn(goal === "speed")}
-                              onClick={() => setGoal("speed")}
-                            >
-                              Improve speed ⚡
-                            </Button>
-                            <Button
-                              variant={choiceBtn(goal === "weak_topics")}
-                              onClick={() => setGoal("weak_topics")}
-                            >
-                              Strengthen weak topics 📚
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-xs font-medium text-muted-foreground">
-                            Preferred topics / modules
-                          </label>
-                          <Input
-                            value={preferredTopics}
-                            onChange={(e) => setPreferredTopics(e.target.value)}
-                            placeholder="Algebra, Reading Comprehension"
-                          />
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div className="space-y-2">
-                            <label className="text-xs font-medium text-muted-foreground">
-                              Target exam label
-                            </label>
-                            <Input
-                              value={profileTargetExam}
-                              onChange={(e) => setProfileTargetExam(e.target.value)}
-                              placeholder="CAT 2026 / NEET 2027"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-xs font-medium text-muted-foreground">
-                              Profile goal
-                            </label>
-                            <select
-                              value={profileGoal}
-                              onChange={(e) => setProfileGoal(e.target.value as GoalApi)}
-                              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                            >
-                              <option value="score">Score lift</option>
-                              <option value="accuracy">Accuracy</option>
-                              <option value="speed">Speed</option>
-                              <option value="concepts">Concept clarity</option>
-                            </select>
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-xs font-medium text-muted-foreground">
-                              Next mock date
-                            </label>
-                            <Input
-                              type="date"
-                              value={profileNextMockDate}
-                              onChange={(e) => setProfileNextMockDate(e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-xs font-medium text-muted-foreground">
-                              Daily study minutes
-                            </label>
-                            <Input
-                              value={profileDailyMinutes}
-                              onChange={(e) => setProfileDailyMinutes(e.target.value)}
-                              placeholder="60"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-xs font-medium text-muted-foreground">
-                              Biggest struggle
-                            </label>
-                            <Input
-                              value={profileStruggle}
-                              onChange={(e) => setProfileStruggle(e.target.value)}
-                              placeholder="Time pressure in section 2"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-xs font-medium text-muted-foreground">
-                              Timezone
-                            </label>
-                            <Input
-                              value={profileTimezone}
-                              onChange={(e) => setProfileTimezone(e.target.value)}
-                              placeholder="Asia/Kolkata"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
+                  <details className="rounded-xl border bg-slate-50/70 p-4">
+                    <summary className="cursor-pointer text-sm font-medium text-slate-900">
+                      Advanced context (optional)
+                    </summary>
+                    <div className="mt-4 space-y-4">
+                      <div className="space-y-3">
+                        <h4 className="text-sm font-semibold text-slate-900">Goal focus</h4>
+                        <div className="grid gap-2">
                           <Button
-                            variant="secondary"
-                            onClick={saveProfile}
-                            disabled={profileSaving}
+                            variant={choiceBtn(goal === "percentile")}
+                            onClick={() => setGoal("percentile")}
                           >
-                            {profileSaving ? "Saving..." : "Save profile"}
+                            Improve score percentile 🚀
+                          </Button>
+                          <Button
+                            variant={choiceBtn(goal === "accuracy")}
+                            onClick={() => setGoal("accuracy")}
+                          >
+                            Improve accuracy 🎯
+                          </Button>
+                          <Button
+                            variant={choiceBtn(goal === "speed")}
+                            onClick={() => setGoal("speed")}
+                          >
+                            Improve speed ⚡
+                          </Button>
+                          <Button
+                            variant={choiceBtn(goal === "weak_topics")}
+                            onClick={() => setGoal("weak_topics")}
+                          >
+                            Strengthen weak topics 📚
                           </Button>
                         </div>
                       </div>
-                    </details>
-                  </div>
-                )}
-
-                {step === 2 && (
-                  <div className="space-y-5">
-                    <div className="space-y-1">
-                      <h3 className="text-base font-semibold flex items-center gap-2">
-                        <Upload className="w-5 h-5" /> Upload your mock
-                      </h3>
-                      <p className="text-xs text-muted-foreground">
-                        PDF, screenshots, or pasted text works. We only use your mock
-                        to generate your plan.
-                      </p>
-                    </div>
-
-                    <div
-                      className={cn(
-                        "rounded-xl border-2 border-dashed px-4 py-6 text-center transition",
-                        isDragging
-                          ? "border-indigo-500 bg-indigo-50"
-                          : "border-slate-200 bg-white"
-                      )}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        setIsDragging(true);
-                      }}
-                      onDragLeave={() => setIsDragging(false)}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        setIsDragging(false);
-                        const dropped = Array.from(event.dataTransfer.files || []);
-                        if (dropped.length) setFiles(dropped);
-                      }}
-                    >
-                      <input
-                        id="mock-upload"
-                        type="file"
-                        className="sr-only"
-                        accept="application/pdf,image/*"
-                        multiple
-                        onChange={(e) => setFiles(Array.from(e.target.files || []))}
-                      />
-                      <label htmlFor="mock-upload" className="cursor-pointer space-y-2">
-                        <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
-                          <FileText className="h-5 w-5" />
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Preferred topics / modules
+                        </label>
+                        <Input
+                          value={preferredTopics}
+                          onChange={(e) => setPreferredTopics(e.target.value)}
+                          placeholder="Algebra, Reading Comprehension"
+                        />
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Target exam label
+                          </label>
+                          <Input
+                            value={profileTargetExam}
+                            onChange={(e) => setProfileTargetExam(e.target.value)}
+                            placeholder="CAT 2026 / NEET 2027"
+                          />
                         </div>
-                        <p className="text-sm font-medium text-slate-900">
-                          Drag & drop PDFs or screenshots, or click to upload
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          PDF or images · Best results under 10 MB
-                        </p>
-                      </label>
-                      {files.length ? (
-                        <div className="mt-3 text-xs text-muted-foreground">
-                          Selected:{" "}
-                          <span className="font-medium">{files.length} files</span> ·{" "}
-                          {formatFileSize(files)}
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Profile goal
+                          </label>
+                          <select
+                            value={profileGoal}
+                            onChange={(e) => setProfileGoal(e.target.value as GoalApi)}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            <option value="score">Score lift</option>
+                            <option value="accuracy">Accuracy</option>
+                            <option value="speed">Speed</option>
+                            <option value="concepts">Concept clarity</option>
+                          </select>
                         </div>
-                      ) : null}
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Or paste scorecard text</div>
-                      <Textarea
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        placeholder="Paste your mock result text here"
-                        className="min-h-[140px]"
-                      />
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span>No text available?</span>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Next mock date
+                          </label>
+                          <Input
+                            type="date"
+                            value={profileNextMockDate}
+                            onChange={(e) => setProfileNextMockDate(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Daily study minutes
+                          </label>
+                          <Input
+                            value={profileDailyMinutes}
+                            onChange={(e) => setProfileDailyMinutes(e.target.value)}
+                            placeholder="60"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Biggest struggle
+                          </label>
+                          <Input
+                            value={profileStruggle}
+                            onChange={(e) => setProfileStruggle(e.target.value)}
+                            placeholder="Time pressure in section 2"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Timezone
+                          </label>
+                          <Input
+                            value={profileTimezone}
+                            onChange={(e) => setProfileTimezone(e.target.value)}
+                            placeholder="Asia/Kolkata"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
                         <Button
-                          type="button"
-                          variant="link"
-                          className="px-1 text-xs"
-                          onClick={() => setManualOpen(true)}
+                          variant="secondary"
+                          onClick={saveProfile}
+                          disabled={profileSaving}
                         >
-                          Enter key metrics manually
+                          {profileSaving ? "Saving..." : "Save profile"}
                         </Button>
                       </div>
                     </div>
+                  </details>
+                </div>
 
-                    <Dialog open={manualOpen} onOpenChange={setManualOpen}>
-                      <DialogContent className="sm:max-w-[520px]">
-                        <DialogHeader>
-                          <DialogTitle>Manual fallback entry</DialogTitle>
-                        </DialogHeader>
-                        <div className="grid gap-4">
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <div className="space-y-2">
-                              <label className="text-xs font-medium text-muted-foreground">
-                                Total score
-                              </label>
-                              <Input
-                                value={manualMetrics.totalScore}
-                                onChange={(e) =>
-                                  setManualMetrics((prev) => ({
-                                    ...prev,
-                                    totalScore: e.target.value,
-                                  }))
-                                }
-                                placeholder="e.g. 82/198"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <label className="text-xs font-medium text-muted-foreground">
-                                Accuracy
-                              </label>
-                              <Input
-                                value={manualMetrics.accuracy}
-                                onChange={(e) =>
-                                  setManualMetrics((prev) => ({
-                                    ...prev,
-                                    accuracy: e.target.value,
-                                  }))
-                                }
-                                placeholder="e.g. 62%"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <label className="text-xs font-medium text-muted-foreground">
-                                Attempts
-                              </label>
-                              <Input
-                                value={manualMetrics.attempts}
-                                onChange={(e) =>
-                                  setManualMetrics((prev) => ({
-                                    ...prev,
-                                    attempts: e.target.value,
-                                  }))
-                                }
-                                placeholder="e.g. 58 attempted"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <label className="text-xs font-medium text-muted-foreground">
-                                Weak areas
-                              </label>
-                              <Input
-                                value={manualMetrics.weakAreas}
-                                onChange={(e) =>
-                                  setManualMetrics((prev) => ({
-                                    ...prev,
-                                    weakAreas: e.target.value,
-                                  }))
-                                }
-                                placeholder="e.g. algebra, inference RC"
-                              />
-                            </div>
-                          </div>
-                          <Button onClick={() => setManualOpen(false)}>Save manual input</Button>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
+                <div className="space-y-5">
+                  <div className="space-y-1">
+                    <h3 className="flex items-center gap-2 text-base font-semibold">
+                      <Upload className="h-5 w-5" /> Step 1: Upload your mock
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      PDF, screenshots, or pasted text works. We only use your mock to
+                      generate your plan.
+                    </p>
+                  </div>
 
-                    {hasManualSignals ? (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                        Manual metrics added. We&apos;ll combine them with any uploaded files.
+                  <div
+                    className={cn(
+                      "rounded-xl border-2 border-dashed px-4 py-6 text-center transition",
+                      isDragging
+                        ? "border-indigo-500 bg-indigo-50"
+                        : "border-slate-200 bg-white"
+                    )}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setIsDragging(true);
+                    }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setIsDragging(false);
+                      const dropped = Array.from(event.dataTransfer.files || []);
+                      if (dropped.length) setFiles(dropped);
+                    }}
+                  >
+                    <input
+                      id="mock-upload"
+                      type="file"
+                      className="sr-only"
+                      accept="application/pdf,image/*"
+                      multiple
+                      onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                    />
+                    <label htmlFor="mock-upload" className="cursor-pointer space-y-2">
+                      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
+                        <FileText className="h-5 w-5" />
+                      </div>
+                      <p className="text-sm font-medium text-slate-900">
+                        Drag & drop PDFs or screenshots, or click to upload
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        PDF or images · Best results under 10 MB
+                      </p>
+                    </label>
+                    {files.length ? (
+                      <div className="mt-3 text-xs text-muted-foreground">
+                        Selected: <span className="font-medium">{files.length} files</span>{" "}
+                        · {formatFileSize(files)}
                       </div>
                     ) : null}
+                  </div>
 
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Or paste scorecard text</div>
+                    <Textarea
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      placeholder="Paste your mock result text here"
+                      className="min-h-[140px]"
+                    />
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>No text available?</span>
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="px-1 text-xs"
+                        onClick={() => setManualOpen(true)}
+                      >
+                        Enter key metrics manually
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Dialog open={manualOpen} onOpenChange={setManualOpen}>
+                    <DialogContent className="sm:max-w-[520px]">
+                      <DialogHeader>
+                        <DialogTitle>Manual fallback entry</DialogTitle>
+                      </DialogHeader>
+                      <div className="grid gap-4">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <label className="text-xs font-medium text-muted-foreground">
+                              Total score
+                            </label>
+                            <Input
+                              value={manualMetrics.totalScore}
+                              onChange={(e) =>
+                                setManualMetrics((prev) => ({
+                                  ...prev,
+                                  totalScore: e.target.value,
+                                }))
+                              }
+                              placeholder="e.g. 82/198"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-medium text-muted-foreground">
+                              Accuracy
+                            </label>
+                            <Input
+                              value={manualMetrics.accuracy}
+                              onChange={(e) =>
+                                setManualMetrics((prev) => ({
+                                  ...prev,
+                                  accuracy: e.target.value,
+                                }))
+                              }
+                              placeholder="e.g. 62%"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-medium text-muted-foreground">
+                              Attempts
+                            </label>
+                            <Input
+                              value={manualMetrics.attempts}
+                              onChange={(e) =>
+                                setManualMetrics((prev) => ({
+                                  ...prev,
+                                  attempts: e.target.value,
+                                }))
+                              }
+                              placeholder="e.g. 58 attempted"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-medium text-muted-foreground">
+                              Weak areas
+                            </label>
+                            <Input
+                              value={manualMetrics.weakAreas}
+                              onChange={(e) =>
+                                setManualMetrics((prev) => ({
+                                  ...prev,
+                                  weakAreas: e.target.value,
+                                }))
+                              }
+                              placeholder="e.g. algebra, inference RC"
+                            />
+                          </div>
+                        </div>
+                        <Button onClick={() => setManualOpen(false)}>
+                          Save manual input
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+
+                  {hasManualSignals ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      Manual metrics added. We&apos;ll combine them with any uploaded files.
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    <h3 className="text-base font-semibold">Step 2: Generate your plan</h3>
                     <Button
                       onClick={onAnalyze}
                       disabled={!canAnalyze || loading}
@@ -1086,43 +805,22 @@ export default function LandingPage() {
                     >
                       {loading ? "Analyzing..." : "Generate my plan"}
                     </Button>
-                    {loading ? (
-                      <LoadingCard lines={2} />
-                    ) : null}
-                    <div className="text-xs text-muted-foreground">
-                      We never share your mock. Results stay tied to your account only.
-                    </div>
                   </div>
-                )}
-
-                <div className="flex flex-wrap justify-between gap-3 pt-2">
-                  <Button
-                    variant="ghost"
-                    disabled={step === 1}
-                    onClick={() => setStep((current) => Math.max(1, current - 1))}
-                  >
-                    Back
-                  </Button>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={!canGoNext || step === 2}
-                      onClick={() => setStep((current) => Math.min(2, current + 1))}
-                    >
-                      Next
-                    </Button>
-                    {lastReportId ? (
-                      <Button onClick={() => router.push(`/report/${lastReportId}`)}>
-                        Resume last report
-                      </Button>
-                    ) : (
-                      <Button variant="secondary" onClick={() => router.push("/report/sample")}
-                      >
-                        View sample report
-                      </Button>
-                    )}
+                  {loading ? <LoadingCard lines={2} /> : null}
+                  <div className="text-xs text-muted-foreground">
+                    We never share your mock. Results stay tied to your account only.
                   </div>
                 </div>
+
+                {lastReportId ? (
+                  <Button
+                    variant="ghost"
+                    className="w-fit px-0 text-xs text-muted-foreground"
+                    onClick={() => router.push(`/report/${lastReportId}`)}
+                  >
+                    Resume last report
+                  </Button>
+                ) : null}
               </CardContent>
             </Card>
           </section>
@@ -1167,13 +865,8 @@ export default function LandingPage() {
           <Card className="rounded-2xl border border-slate-200 bg-white shadow-sm">
             <CardContent className="space-y-5 p-6">
               <SectionHeader
-                title="Save your study profile"
-                description="Optional, but it keeps your mock history and goals synced."
-                action={
-                  <Button variant="outline" size="sm" onClick={() => setSignInOpen(true)}>
-                    Sign in to sync
-                  </Button>
-                }
+                title="Study profile snapshot"
+                description="A quick baseline of your current goals and habits."
               />
               <div className="flex items-center gap-4">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-base font-semibold text-indigo-700">
@@ -1209,9 +902,7 @@ export default function LandingPage() {
           <NextBestActionRail
             actions={sampleNextActions as any}
             title="Next best actions"
-            emptyMessage="Sample report shows your next best action."
-            ctaLabel="Preview sample report"
-            onCtaClick={() => router.push("/report/sample")}
+            emptyMessage="Run a mock to generate your next best action."
           />
         </section>
 

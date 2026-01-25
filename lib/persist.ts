@@ -196,6 +196,7 @@ export async function upsertUser(userId: string) {
     {
       $setOnInsert: {
         _id: userId, // string _id is totally valid in Mongo
+        userId,
         createdAt: new Date(),
         displayName: null,
         examDefault: null,

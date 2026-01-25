@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import { z } from "zod";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const EI_MODEL = process.env.OPENAI_EI_MODEL || "gpt-4.1-mini";
 
 const EiResponseSchema = z
@@ -55,6 +54,7 @@ export async function generateEiResponse(message: string) {
     return FALLBACK_RESPONSE;
   }
 
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const response = await client.responses.create({
     model: EI_MODEL,
     input: [

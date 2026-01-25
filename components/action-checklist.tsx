@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ActionState, ReportAction } from "@/lib/domain/types";
+import type { ActionState, ReportAction } from "@/lib/domain/schemas";
 
 type ActionChecklistProps = {
   attemptId: string;

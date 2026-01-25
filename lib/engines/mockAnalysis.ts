@@ -36,13 +36,16 @@ function extractSections(text: string) {
   const sections: Array<{ name: string; score?: number; accuracy?: number }> = [];
 
   for (const line of lines) {
-    const match = line.match(/^(?<name>[A-Za-z &/]+)\s*[:\-]\s*(?<rest>.+)$/);
-    if (!match?.groups?.name || !match.groups.rest) continue;
-    const name = match.groups.name.trim();
+    const match = line.match(/^([A-Za-z &/]+)\s*[:\-]\s*(.+)$/);
+    const name = match?.[1]?.trim();
+    const rest = match?.[2];
+    if (!name || !rest) continue;
     const keywordHit = SECTION_KEYWORDS.some((keyword) => name.toLowerCase().includes(keyword));
     if (!keywordHit) continue;
-    const scoreMatch = match.groups.rest.match(/score\s*[:\-]?\s*(\d{1,3})/i) ?? match.groups.rest.match(/(\d{1,3})\s*\/\s*\d{1,3}/);
-    const accuracyMatch = match.groups.rest.match(/accuracy\s*[:\-]?\s*(\d{1,3})%?/i) ?? match.groups.rest.match(/(\d{1,3})%/);
+    const scoreMatch =
+      rest.match(/score\s*[:\-]?\s*(\d{1,3})/i) ?? rest.match(/(\d{1,3})\s*\/\s*\d{1,3}/);
+    const accuracyMatch =
+      rest.match(/accuracy\s*[:\-]?\s*(\d{1,3})%?/i) ?? rest.match(/(\d{1,3})%/);
     const score = parseNumeric(scoreMatch?.[1]);
     const accuracy = parseNumeric(accuracyMatch?.[1]);
     if (score !== undefined || accuracy !== undefined) {

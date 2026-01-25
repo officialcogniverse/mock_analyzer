@@ -4,7 +4,9 @@ import { COLLECTIONS, ensureIndexes } from "@/lib/db";
 export async function getUserById(userId: string) {
   const db = await getDb();
   await ensureIndexes(db);
-  return db.collection(COLLECTIONS.users).findOne({ userId });
+  return db.collection<any>(COLLECTIONS.users).findOne({
+    $or: [{ userId }, { _id: userId }],
+  });
 }
 
 export async function assertActiveUser(userId: string) {

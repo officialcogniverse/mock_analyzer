@@ -13,6 +13,8 @@ import { buildNbas } from "@/lib/engines/nba";
 import { buildPlan } from "@/lib/engines/plan";
 import { loadMemorySummary, recordStrategyUsage, selectStrategy } from "@/lib/engines/memory";
 import { assertActiveUser } from "@/lib/users";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
+import { upsertUser } from "@/lib/persist";
 
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_RAWTEXT_LENGTH = 6000;
@@ -31,10 +33,14 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
   const userId = getSessionUserId(session);
-  if (!userId) {
+  const fallbackSession = userId ? null : ensureSession(req);
+  const resolvedUserId = userId || fallbackSession?.userId;
+  if (!resolvedUserId) {
     return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
   }
-  const activeUser = await assertActiveUser(userId);
+
+  await upsertUser(resolvedUserId);
+  const activeUser = await assertActiveUser(resolvedUserId);
   if (!activeUser || activeUser.blocked) {
     return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });
   }
@@ -45,7 +51,12 @@ export async function POST(req: Request) {
   }
 
   const form = await req.formData();
-  const file = form.get("file");
+  const fileEntry = form.get("file");
+  const filesEntry = form.getAll("files");
+  const file =
+    fileEntry instanceof File
+      ? fileEntry
+      : filesEntry.find((entry): entry is File => entry instanceof File) ?? null;
   const textInput = form.get("text")?.toString() ?? "";
 
   let rawText = "";
@@ -55,7 +66,7 @@ export async function POST(req: Request) {
   const missingFromInput: string[] = [];
   let extractionNotes: string | undefined;
 
-  if (file && file instanceof File) {
+  if (file) {
     if (file.size > MAX_FILE_SIZE_BYTES) {
       return NextResponse.json(
         fail("FILE_TOO_LARGE", "File exceeds 8MB limit."),
@@ -94,6 +105,17 @@ export async function POST(req: Request) {
   }
 
   rawText = rawText.trim();
+  if (!rawText) {
+    return NextResponse.json(
+      fail(
+        "EMPTY_INPUT",
+        sourceType === "image"
+          ? "We couldn’t read that image. Please upload a PDF or paste the text."
+          : "We couldn’t read that input. Please upload a PDF or paste the text."
+      ),
+      { status: 400 }
+    );
+  }
   textChars = rawText.length;
   const normalizedRawText = rawText.slice(0, MAX_RAWTEXT_LENGTH);
 
@@ -110,7 +132,12 @@ export async function POST(req: Request) {
   await ensureIndexes(db);
 
   const examLabel = exam.detected ?? "agnostic";
-  const memorySummary = await loadMemorySummary(db, userId, examLabel, inferred.persona ?? "steady");
+  const memorySummary = await loadMemorySummary(
+    db,
+    resolvedUserId,
+    examLabel,
+    inferred.persona ?? "steady"
+  );
   const strategy = selectStrategy({
     exam: examLabel,
     persona: inferred.persona ?? "steady",
@@ -134,7 +161,7 @@ export async function POST(req: Request) {
   const recommendations = db.collection(COLLECTIONS.recommendations);
 
   const attemptDoc = {
-    userId,
+    userId: resolvedUserId,
     createdAt: new Date(),
     source: {
       type: sourceType,
@@ -155,7 +182,7 @@ export async function POST(req: Request) {
   const attemptResult = await attempts.insertOne(attemptDoc);
 
   const recommendationDoc = {
-    userId,
+    userId: resolvedUserId,
     attemptId: attemptResult.insertedId.toString(),
     createdAt: new Date(),
     insights: recommendation.insights,
@@ -165,10 +192,12 @@ export async function POST(req: Request) {
   };
   const recommendationResult = await recommendations.insertOne(recommendationDoc);
 
-  await recordStrategyUsage(db, userId, strategy);
+  await recordStrategyUsage(db, resolvedUserId, strategy);
 
-  return NextResponse.json(
+  const res = NextResponse.json(
     ok({
+      id: attemptResult.insertedId.toString(),
+      recommendationId: recommendationResult.insertedId.toString(),
       attempt: { ...attemptDoc, _id: attemptResult.insertedId.toString() },
       recommendation: {
         ...recommendationDoc,
@@ -185,4 +214,8 @@ export async function POST(req: Request) {
       recentEvents: [],
     })
   );
+  if (fallbackSession?.isNew) {
+    attachSessionCookie(res, fallbackSession);
+  }
+  return res;
 }

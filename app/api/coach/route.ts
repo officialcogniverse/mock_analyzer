@@ -136,9 +136,11 @@ export async function POST(req: Request) {
   fireAndForgetEvent({
     userId: session.userId,
     payload: {
-      event_name: "coach_message_sent",
-      attempt_id: parsed.data.attemptId,
-      metadata: { mode: parsed.data.mode, conversationId: conversation.conversationId },
+      eventName: "coach_message_sent",
+      payload: {
+        attempt_id: parsed.data.attemptId,
+        metadata: { mode: parsed.data.mode, conversationId: conversation.conversationId },
+      },
     },
   });
 

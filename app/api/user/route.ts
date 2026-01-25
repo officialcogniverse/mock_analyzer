@@ -8,6 +8,8 @@ import { getDb } from "@/lib/mongodb";
 import { COLLECTIONS, ensureIndexes } from "@/lib/db";
 import { ThemeSchema } from "@/lib/schemas/userProfile";
 import { assertActiveUser } from "@/lib/users";
+import { attachSessionCookie, ensureSession } from "@/lib/session";
+import { upsertUser } from "@/lib/persist";
 
 const UpdateSchema = z.object({
   displayName: z.string().optional().nullable(),
@@ -25,27 +27,39 @@ const UpdateSchema = z.object({
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
   const userId = getSessionUserId(session);
-  if (!userId) {
+  const fallbackSession = userId ? null : ensureSession(req);
+  const resolvedUserId = userId || fallbackSession?.userId;
+  if (!resolvedUserId) {
     return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
   }
-  const activeUser = await assertActiveUser(userId);
+
+  await upsertUser(resolvedUserId);
+  const activeUser = await assertActiveUser(resolvedUserId);
   if (!activeUser || activeUser.blocked) {
     return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });
   }
 
-  return NextResponse.json(ok(activeUser));
+  const res = NextResponse.json(ok(activeUser));
+  if (fallbackSession?.isNew) {
+    attachSessionCookie(res, fallbackSession);
+  }
+  return res;
 }
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
   const userId = getSessionUserId(session);
-  if (!userId) {
+  const fallbackSession = userId ? null : ensureSession(req);
+  const resolvedUserId = userId || fallbackSession?.userId;
+  if (!resolvedUserId) {
     return NextResponse.json(fail("UNAUTHORIZED", "Sign in required."), { status: 401 });
   }
-  const activeUser = await assertActiveUser(userId);
+
+  await upsertUser(resolvedUserId);
+  const activeUser = await assertActiveUser(resolvedUserId);
   if (!activeUser || activeUser.blocked) {
     return NextResponse.json(fail("ACCOUNT_DELETED", "Account deleted."), { status: 403 });
   }
@@ -60,15 +74,24 @@ export async function POST(req: Request) {
 
   const db = await getDb();
   await ensureIndexes(db);
-  const users = db.collection(COLLECTIONS.users);
+  const users = db.collection<any>(COLLECTIONS.users);
 
   const patch = {
     ...parsed.data,
     updatedAt: new Date(),
   };
 
-  await users.updateOne({ userId }, { $set: patch });
-  const updated = await users.findOne({ userId });
+  await users.updateOne(
+    { $or: [{ userId: resolvedUserId }, { _id: resolvedUserId }] },
+    { $set: { ...patch, userId: resolvedUserId } }
+  );
+  const updated = await users.findOne({
+    $or: [{ userId: resolvedUserId }, { _id: resolvedUserId }],
+  });
 
-  return NextResponse.json(ok(updated));
+  const res = NextResponse.json(ok(updated));
+  if (fallbackSession?.isNew) {
+    attachSessionCookie(res, fallbackSession);
+  }
+  return res;
 }
