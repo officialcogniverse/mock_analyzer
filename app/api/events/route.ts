@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   const payload = await req.json().catch(() => null);
   const parsed = EventRequestSchema.safeParse(payload);
 
-  const userId = getOrCreateUserId();
+  const userId = await getOrCreateUserId();
   const state = await getUserState(userId);
   const fallback = createDefaultEventResponse({
     userId: state.userId,

@@ -288,7 +288,7 @@ export function IntakeBot({ intake, onIntakeChange, analysis, onReset }: IntakeB
           ))}
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border/70 bg-background/40 p-4 text-sm">
+        <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border/70 bg-transparent/40 p-4 text-sm">
           {messages.map((message, idx) => (
             <div
               key={`${message.role}-${idx}`}

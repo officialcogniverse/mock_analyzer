@@ -16,7 +16,7 @@ type ModeTabsProps = {
 
 export function ModeTabs({ mode, onChange }: ModeTabsProps) {
   return (
-    <div className="flex flex-wrap gap-2 rounded-2xl border border-border/70 bg-background/70 p-2">
+    <div className="flex flex-wrap gap-2 rounded-2xl border border-border/70 bg-transparent/70 p-2">
       {modes.map((item) => (
         <Button
           key={item.id}

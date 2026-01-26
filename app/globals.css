@@ -1,186 +1,151 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Tailwind v4 custom variant so `.dark` works across descendants */
 @custom-variant dark (&:is(.dark *));
 
+/* Map our design tokens to Tailwind/shadcn color tokens */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Geist Sans", "Inter", "SF Pro Text", "Segoe UI", system-ui,
-    -apple-system, sans-serif;
-  --font-mono: "Geist Mono", "SF Mono", "SFMono-Regular", "JetBrains Mono",
-    ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
+
   --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Optional: keep radius tokens if your UI uses them */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
-  --text-display: clamp(2.25rem, 4vw, 3.25rem);
-  --text-h1: clamp(1.75rem, 3vw, 2.5rem);
-  --text-h2: clamp(1.375rem, 2.4vw, 1.875rem);
-  --text-title: 1.125rem;
-  --text-body: 1rem;
-  --text-muted: 0.925rem;
-  --space-section: clamp(2.5rem, 5vw, 4rem);
-  --space-card: clamp(1.25rem, 2vw, 1.75rem);
 }
+
 
 :root {
   --radius: 0.9rem;
+
+  /* LIGHT (won’t be used if html has class="dark") */
   --background: oklch(0.98 0.006 250);
   --foreground: oklch(0.24 0.03 258);
+
   --card: oklch(1 0.004 250);
   --card-foreground: oklch(0.2 0.03 258);
+
   --popover: oklch(1 0.008 250);
   --popover-foreground: oklch(0.2 0.03 258);
+
+  /* Gold/amber primary */
   --primary: oklch(0.78 0.14 85);
   --primary-foreground: oklch(0.22 0.03 258);
+
   --secondary: oklch(0.95 0.02 250);
   --secondary-foreground: oklch(0.3 0.05 262);
+
   --muted: oklch(0.97 0.01 252);
   --muted-foreground: oklch(0.48 0.035 257);
+
   --accent: oklch(0.92 0.03 95);
   --accent-foreground: oklch(0.3 0.05 268);
+
   --destructive: oklch(0.62 0.22 27);
+
   --border: oklch(0.9 0.01 255);
   --input: oklch(0.92 0.01 255);
   --ring: oklch(0.78 0.14 85);
-  --chart-1: oklch(0.78 0.14 85);
-  --chart-2: oklch(0.72 0.12 55);
-  --chart-3: oklch(0.7 0.1 120);
-  --chart-4: oklch(0.82 0.14 85);
-  --chart-5: oklch(0.76 0.17 45);
-  --sidebar: oklch(0.99 0.012 252);
-  --sidebar-foreground: oklch(0.202 0.03 258);
-  --sidebar-primary: oklch(0.58 0.16 264);
-  --sidebar-primary-foreground: oklch(0.99 0.015 255);
-  --sidebar-accent: oklch(0.94 0.02 260);
-  --sidebar-accent-foreground: oklch(0.285 0.05 262);
-  --sidebar-border: oklch(0.9 0.015 255);
-  --sidebar-ring: oklch(0.64 0.14 270);
-  --gradient-hero: radial-gradient(circle at top left, oklch(0.98 0.04 90) 0%, transparent 60%),
-    radial-gradient(circle at 85% 10%, oklch(0.96 0.02 210) 0%, transparent 62%);
 }
 
 .dark {
+  /* DARK charcoal */
   --background: oklch(0.12 0.02 260);
   --foreground: oklch(0.95 0.01 255);
+
   --card: oklch(0.18 0.02 262);
   --card-foreground: oklch(0.95 0.01 255);
+
   --popover: oklch(0.18 0.02 262);
   --popover-foreground: oklch(0.95 0.01 255);
+
+  /* Stronger gold in dark */
   --primary: oklch(0.82 0.15 85);
   --primary-foreground: oklch(0.12 0.02 260);
+
   --secondary: oklch(0.24 0.02 262);
   --secondary-foreground: oklch(0.95 0.01 255);
+
   --muted: oklch(0.24 0.02 262);
   --muted-foreground: oklch(0.72 0.03 256);
+
   --accent: oklch(0.3 0.05 90);
   --accent-foreground: oklch(0.95 0.01 255);
+
   --destructive: oklch(0.7 0.2 28);
+
   --border: oklch(0.34 0.03 260 / 80%);
   --input: oklch(0.34 0.03 260 / 80%);
   --ring: oklch(0.82 0.15 85);
-  --chart-1: oklch(0.82 0.15 85);
-  --chart-2: oklch(0.72 0.12 55);
-  --chart-3: oklch(0.68 0.1 120);
-  --chart-4: oklch(0.86 0.14 85);
-  --chart-5: oklch(0.78 0.16 42);
-  --sidebar: oklch(0.15 0.02 262);
-  --sidebar-foreground: oklch(0.95 0.01 255);
-  --sidebar-primary: oklch(0.82 0.15 85);
-  --sidebar-primary-foreground: oklch(0.12 0.02 260);
-  --sidebar-accent: oklch(0.24 0.02 262);
-  --sidebar-accent-foreground: oklch(0.95 0.01 255);
-  --sidebar-border: oklch(0.34 0.03 260 / 70%);
-  --sidebar-ring: oklch(0.82 0.15 85);
-  --gradient-hero: radial-gradient(circle at top left, oklch(0.24 0.06 90) 0%, transparent 60%),
-    radial-gradient(circle at 85% 10%, oklch(0.22 0.05 60) 0%, transparent 62%);
 }
 
+/* Base styling that uses shadcn/tailwind tokens */
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
 
   body {
-    @apply min-h-screen bg-background text-foreground antialiased;
-    background-image: var(--gradient-hero);
-    background-attachment: scroll;
-  }
-
-  h1 {
-    font-size: var(--text-h1);
-    @apply font-semibold tracking-tight text-foreground;
-  }
-
-  h2 {
-    font-size: var(--text-h2);
-    @apply font-semibold tracking-tight text-foreground;
-  }
-
-  h3 {
-    font-size: var(--text-title);
-    @apply font-semibold tracking-tight text-foreground;
-  }
-
-  p {
-    font-size: var(--text-body);
-    @apply leading-relaxed text-foreground;
+    @apply min-h-screen bg-transparent text-foreground antialiased;
   }
 }
 
+/* Small utility helpers (optional) */
 @layer utilities {
-  .text-display {
-    font-size: var(--text-display);
-    @apply font-semibold tracking-tight text-foreground;
-  }
-
-  .text-muted {
-    font-size: var(--text-muted);
-    @apply text-muted-foreground;
-  }
-
   .surface-card {
-    @apply rounded-2xl border border-border/70 bg-card/95 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.18)] backdrop-blur;
-  }
-
-  .surface-glow {
-    @apply relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/10 via-background to-transparent;
+    @apply rounded-2xl border border-border/70 bg-card/95 backdrop-blur;
+    box-shadow: 0 18px 40px -32px rgba(15, 23, 42, 0.18);
   }
 
   .tap-scale {
     @apply transition-transform duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99];
   }
 }
+
+@layer base {
+  html,
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+
+  input,
+  textarea {
+    color: var(--foreground);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--muted-foreground);
+    opacity: 0.9;
+  }
+}
+
+
+

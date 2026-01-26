@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractTextFromPdf } from "@/lib/extractText";
@@ -9,6 +10,7 @@ import {
 } from "@/lib/contracts";
 import { getOrCreateUserId } from "@/lib/state/user";
 
+export const runtime = "nodejs";
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_RAWTEXT_LENGTH = 8000;
 const MIN_EXTRACTED_TEXT = 120;
@@ -18,7 +20,6 @@ const TextInputSchema = z.object({
   text: z.string().trim().min(MIN_TEXT_LENGTH, "Text is too short."),
 });
 
-export const runtime = "nodejs";
 
 function errorResponse(
   code: string,
@@ -76,7 +77,7 @@ async function parseRequest(req: Request): Promise<{
 }
 
 export async function POST(req: Request) {
-  const userId = getOrCreateUserId();
+  const userId = await getOrCreateUserId();
   const { file, textInput, intakeInput, horizonDays } = await parseRequest(req);
 
   let rawText = "";
