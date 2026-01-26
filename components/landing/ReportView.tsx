@@ -1,16 +1,17 @@
 "use client";
 
-import type { AnalysisResult } from "@/lib/engine/schemas";
+import type { AnalyzeResponse, NextBestAction } from "@/lib/contracts";
+import { emitEvent } from "@/lib/clientEvents";
 
 type ReportViewProps = {
-  analysis: AnalysisResult | null;
+  analysis: AnalyzeResponse | null;
   loading: boolean;
 };
 
-const dataQualityTone: Record<AnalysisResult["confidence"]["dataQuality"], string> = {
-  low: "bg-destructive/15 text-destructive",
-  medium: "bg-amber-100/70 text-amber-700",
-  high: "bg-emerald-100/70 text-emerald-700",
+const statusBadge: Record<NextBestAction["difficulty"], string> = {
+  easy: "bg-emerald-500/10 text-emerald-200",
+  medium: "bg-amber-400/10 text-amber-200",
+  hard: "bg-rose-400/10 text-rose-200",
 };
 
 export function ReportView({ analysis, loading }: ReportViewProps) {
@@ -34,121 +35,142 @@ export function ReportView({ analysis, loading }: ReportViewProps) {
     );
   }
 
+  if (!analysis.ok) {
+    return (
+      <section className="surface-card space-y-3 p-6 text-sm">
+        <p className="text-sm font-semibold text-destructive">
+          {analysis.error?.code ?? "ANALYZE_FAILED"}
+        </p>
+        <p className="text-muted-foreground">
+          {analysis.error?.message ?? "We couldn’t analyze that input yet."}
+        </p>
+        {analysis.error?.action ? (
+          <p className="text-xs text-muted-foreground">{analysis.error.action}</p>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-6">
-      <div className="surface-glow p-6">
-        <h3 className="text-lg font-semibold">Summary</h3>
-        <p className="text-muted mt-2">{analysis.summary}</p>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="surface-card space-y-4 p-6">
-          <h3 className="text-lg font-semibold">Top Errors</h3>
-          <div className="space-y-3">
-            {analysis.topErrors.map((errorItem, idx) => (
-              <div key={`${errorItem.title}-${idx}`} className="rounded-2xl border border-border/70 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold">{errorItem.title}</p>
-                  <span className="rounded-full bg-primary/10 px-3 py-1 text-xs text-primary">
-                    Severity {errorItem.severity}
-                  </span>
-                </div>
-                <p className="mt-2 text-sm text-muted-foreground">{errorItem.whyItHappens}</p>
-                <p className="mt-2 text-sm font-medium text-foreground">{errorItem.fix}</p>
-              </div>
+      {analysis.warnings.length ? (
+        <div className="surface-card border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+          <p className="font-semibold">Heads up</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {analysis.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
             ))}
-          </div>
+          </ul>
         </div>
-
-        <div className="surface-card space-y-4 p-6">
-          <h3 className="text-lg font-semibold">Next Best Actions</h3>
-          <div className="space-y-3">
-            {analysis.nextBestActions.map((action, idx) => (
-              <div key={`${action.title}-${idx}`} className="rounded-2xl border border-border/70 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold">{action.title}</p>
-                  <span className="rounded-full bg-secondary px-3 py-1 text-xs text-secondary-foreground">
-                    {action.priority}
-                  </span>
-                </div>
-                <p className="mt-2 text-sm text-muted-foreground">{action.reason}</p>
-                <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                  <span>{action.timeMinutes} min</span>
-                  <span>Difficulty {action.difficulty}/5</span>
-                </div>
-                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                  {action.checklist.map((step, stepIdx) => (
-                    <li key={`${action.title}-step-${stepIdx}`}>{step}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      ) : null}
 
       <div className="surface-card space-y-4 p-6">
-        <h3 className="text-lg font-semibold">{analysis.plan.horizonDays}-Day Study Plan</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-semibold">Next Best Actions</h3>
+            <p className="text-sm text-muted-foreground">
+              Start with one action today and mark it when done.
+            </p>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Source: {analysis.meta.source.toUpperCase()} · {analysis.meta.extractedChars} chars
+          </p>
+        </div>
+
         <div className="space-y-4">
-          {analysis.plan.days.map((day) => (
-            <div key={`day-${day.day}`} className="rounded-2xl border border-border/70 p-4">
-              <p className="text-sm font-semibold">
-                Day {day.day}: {day.focus}
-              </p>
+          {analysis.nextBestActions.map((action) => (
+            <div key={action.id} className="rounded-2xl border border-border/70 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold">{action.title}</p>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className={`rounded-full px-3 py-1 ${statusBadge[action.difficulty]}`}>
+                    {action.difficulty}
+                  </span>
+                  <span className="rounded-full bg-secondary px-3 py-1 text-secondary-foreground">
+                    {action.estimatedImpact} impact
+                  </span>
+                </div>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">{action.why}</p>
               <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                {day.tasks.map((task, idx) => (
-                  <div key={`${day.day}-${idx}`} className="rounded-xl bg-muted/40 px-3 py-2">
-                    <p className="font-medium text-foreground">
-                      {task.title} · {task.minutes} min
-                    </p>
-                    <p className="text-xs text-muted-foreground">{task.method}</p>
-                    <p className="text-xs text-muted-foreground">{task.expectedOutcome}</p>
-                  </div>
-                ))}
+                <p>
+                  <span className="font-semibold text-foreground">When:</span>{" "}
+                  {action.instructions.when}
+                </p>
+                <p>
+                  <span className="font-semibold text-foreground">What:</span>{" "}
+                  {action.instructions.what}
+                </p>
+                <p>
+                  <span className="font-semibold text-foreground">Stop:</span>{" "}
+                  {action.instructions.stoppingCondition}
+                </p>
+                <p>
+                  <span className="font-semibold text-foreground">Success:</span>{" "}
+                  {action.instructions.successCriteria}
+                </p>
+                <p className="text-xs">
+                  Duration: {action.instructions.durationMin} min · Category: {action.category}
+                </p>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                <button
+                  type="button"
+                  className="rounded-full border border-primary/40 px-3 py-1 text-primary hover:border-primary"
+                  onClick={() => emitEvent("action_started", { actionId: action.id })}
+                >
+                  Start
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border border-emerald-400/40 px-3 py-1 text-emerald-200 hover:border-emerald-400"
+                  onClick={() => emitEvent("action_completed", { actionId: action.id })}
+                >
+                  Complete
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border border-muted-foreground/30 px-3 py-1 text-muted-foreground hover:border-muted-foreground"
+                  onClick={() => emitEvent("action_skipped", { actionId: action.id })}
+                >
+                  Skip
+                </button>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="surface-card space-y-4 p-6">
-          <h3 className="text-lg font-semibold">Motivation Reset</h3>
-          <p className="text-sm font-medium text-foreground">{analysis.motivation.currentStateLabel}</p>
-          <p className="text-sm text-muted-foreground">{analysis.motivation.microPepTalk}</p>
-          <p className="text-sm text-muted-foreground">{analysis.motivation.routineAdvice}</p>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            {analysis.motivation.environmentTweaks.map((item, idx) => (
-              <li key={`${item}-${idx}`}>{item}</li>
-            ))}
-          </ul>
-          <p className="text-xs text-muted-foreground">
-            Supportive study guidance only — not medical or therapeutic advice.
-          </p>
-        </div>
-
-        <div className="surface-card space-y-4 p-6">
-          <h3 className="text-lg font-semibold">Confidence & Inputs</h3>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">Data quality</span>
-            <span
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${dataQualityTone[analysis.confidence.dataQuality]}`}
-            >
-              {analysis.confidence.dataQuality}
-            </span>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground">Missing inputs</p>
-            {analysis.confidence.missingInputs.length ? (
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                {analysis.confidence.missingInputs.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">All key intake fields captured.</p>
-            )}
-          </div>
+      <div className="surface-card space-y-4 p-6">
+        <h3 className="text-lg font-semibold">
+          {analysis.executionPlan.horizonDays}-Day Execution Plan
+        </h3>
+        <div className="space-y-4">
+          {analysis.executionPlan.days.map((day) => (
+            <div key={`day-${day.day}`} className="rounded-2xl border border-border/70 p-4">
+              <p className="text-sm font-semibold">
+                Day {day.day}: {day.theme}
+              </p>
+              <p className="text-xs text-muted-foreground">{day.confidenceNote}</p>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                {day.steps.length ? (
+                  day.steps.map((step) => (
+                    <div key={step.id} className="rounded-xl bg-muted/30 px-3 py-2">
+                      <p className="font-medium text-foreground">
+                        {step.title} · {step.timeboxMin} min
+                      </p>
+                      <p className="text-xs text-muted-foreground">{step.instructions}</p>
+                      <p className="text-xs text-muted-foreground">{step.successCriteria}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Keep this day light and repeat your top action.
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </section>

@@ -1,6 +1,6 @@
 # Cogniverse Mock Analyzer
 
-Cogniverse Mock Analyzer is a lean Next.js MVP that turns mock scorecards into deterministic insights, next-best actions, drills, and a next-mock strategy script. It is session-cookie only (guest mode) and stores attempts in MongoDB.
+Cogniverse Mock Analyzer is a lean Next.js MVP that turns mock scorecards into next-best actions and a 7-day execution plan. It uses a central state engine with event-based updates and supports anonymous, cookie-based usage.
 
 ## Quick start
 
@@ -23,22 +23,55 @@ MONGODB_DB="cogniverse"
 
 ## Core flow
 
-- **Dashboard** (`/`) → upload PDF or paste text → `POST /api/analyze`.
-- **Report** (`/report/[id]`) → `GET /api/attempts/[id]` for the attempt + recommendation.
+- **Landing** (`/`) → upload PDF or paste text → `POST /api/analyze`.
+- UI emits events to `POST /api/events`, backend updates user state, and the bot reads that state.
 
 ## API contracts
 
 ### `POST /api/analyze`
-`multipart/form-data` with:
+Accepts `multipart/form-data` or JSON:
 
-- `file?`: PDF (images accepted but OCR is not enabled yet)
-- `text?`: pasted text
-- `intake`: JSON string `{ goal, hardest, weekly_hours, next_mock_date?, preferred_topics? }`
+- `file?`: PDF (text-based only; scanned PDFs return a friendly error)
+- `text?`: pasted scorecard text
+- `intake?`: JSON string with optional intake answers
 
-Returns `{ ok: true, id, recommendationId, attempt, recommendation }`.
+Returns a stable `AnalyzeResponse`:
 
-### `GET /api/attempts/[id]`
-Returns `{ ok: true, attempt, recommendation }` for the current session cookie.
+```json
+{
+  "ok": true,
+  "error": null,
+  "meta": { "source": "pdf", "scannedPdf": false, "extractedChars": 1200 },
+  "nextBestActions": [],
+  "executionPlan": { "horizonDays": 7, "days": [] },
+  "stateSnapshot": { "userId": "anon_...", "version": 4, "signals": {}, "facts": {} },
+  "warnings": []
+}
+```
+
+### `POST /api/bot`
+Accepts `{ "message": "string" }` and returns:
+
+```json
+{
+  "ok": true,
+  "message": "Calm response...",
+  "directives": [],
+  "stateSnapshot": { "userId": "anon_...", "version": 5, "signals": {}, "facts": {} },
+  "error": null
+}
+```
+
+### `POST /api/events`
+Accepts `{ type, payload?, ts? }` and returns:
+
+```json
+{
+  "ok": true,
+  "error": null,
+  "stateSnapshot": { "userId": "anon_...", "version": 6, "signals": {}, "facts": {} }
+}
+```
 
 ## Code map
 
