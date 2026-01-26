@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import type { AnalysisResult, IntakeAnswers } from "@/lib/engine/schemas";
+import type { AnalyzeResponse } from "@/lib/contracts";
+import type { IntakeAnswers } from "@/lib/engine/schemas";
+import { emitEvent } from "@/lib/clientEvents";
 
 type UploadPanelProps = {
   intake?: IntakeAnswers;
@@ -12,7 +14,7 @@ type UploadPanelProps = {
   horizonDays: 7 | 14;
   onMockTextChange: (value: string) => void;
   onHorizonChange: (value: 7 | 14) => void;
-  onReport: (result: AnalysisResult) => void;
+  onReport: (result: AnalyzeResponse) => void;
   onLoadingChange: (loading: boolean) => void;
   onReset: () => void;
 };
@@ -53,15 +55,21 @@ export function UploadPanel({
       return;
     }
 
-    setLoading(true);
-    onLoadingChange(true);
-    setError(null);
+      setLoading(true);
+      onLoadingChange(true);
+      setError(null);
 
-    try {
-      const form = new FormData();
-      if (file) form.append("file", file);
-      if (mockText.trim()) form.append("text", mockText.trim());
-      if (intake) form.append("intake", JSON.stringify(intake));
+      await emitEvent("analyze_clicked", {
+        hasFile: Boolean(file),
+        hasText: Boolean(mockText.trim()),
+        horizonDays,
+      });
+
+      try {
+        const form = new FormData();
+        if (file) form.append("file", file);
+        if (mockText.trim()) form.append("text", mockText.trim());
+        if (intake) form.append("intake", JSON.stringify(intake));
       form.append("horizonDays", horizonDays.toString());
 
       const res = await fetch("/api/analyze", {
@@ -76,10 +84,15 @@ export function UploadPanel({
           code: payload?.error?.code ?? "ANALYZE_FAILED",
           message: payload?.error?.message ?? "Unable to analyze. Please try again.",
         });
+        onReport(payload as AnalyzeResponse);
         return;
       }
 
-      onReport(payload.result as AnalysisResult);
+      onReport(payload as AnalyzeResponse);
+      await emitEvent("plan_generated", {
+        horizonDays: payload.executionPlan?.horizonDays ?? horizonDays,
+        actionCount: payload.nextBestActions?.length ?? 0,
+      });
     } catch (err) {
       setError({
         code: "NETWORK_ERROR",
@@ -159,7 +172,7 @@ export function UploadPanel({
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" className="tap-scale" onClick={handleSubmit} disabled={loading}>
-          {loading ? "Generating..." : "Generate Report"}
+          {loading ? "Analyzing..." : "Analyze calmly"}
         </Button>
         <Button type="button" variant="ghost" onClick={handleReset}>
           Reset

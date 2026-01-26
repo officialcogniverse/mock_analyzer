@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { IntakeBot } from "@/components/landing/IntakeBot";
 import { ReportView } from "@/components/landing/ReportView";
 import { UploadPanel } from "@/components/landing/UploadPanel";
-import type { AnalysisResult, IntakeAnswers } from "@/lib/engine/schemas";
+import type { AnalyzeResponse } from "@/lib/contracts";
+import type { IntakeAnswers } from "@/lib/engine/schemas";
 
 const STORAGE_KEYS = {
   intake: "cogniverse_intake_v1",
@@ -15,7 +16,7 @@ const STORAGE_KEYS = {
 
 export default function HomePage() {
   const [intake, setIntake] = useState<IntakeAnswers>({});
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [mockText, setMockText] = useState("");
   const [horizonDays, setHorizonDays] = useState<7 | 14>(7);
   const [loading, setLoading] = useState(false);
@@ -83,7 +84,7 @@ export default function HomePage() {
   };
 
   const headerSubtitle = useMemo(() => {
-    if (analysis) return "Your report is ready — chat with the companion to refine it.";
+    if (analysis?.ok) return "Your report is ready — refine it with the companion anytime.";
     return "Answer a few questions, upload a mock, and get a focused study plan.";
   }, [analysis]);
 
