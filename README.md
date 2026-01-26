@@ -15,6 +15,8 @@ Open [http://localhost:3000](http://localhost:3000).
 Create a `.env.local` file:
 
 ```bash
+OPENAI_API_KEY="your-key"
+OPENAI_MODEL="gpt-4o-mini"
 MONGODB_URI="mongodb://localhost:27017"
 MONGODB_DB="cogniverse"
 ```
