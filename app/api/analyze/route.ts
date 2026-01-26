@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractTextFromPdf } from "@/lib/extractText";
-import { analyzeMockText } from "@/lib/engines/mvpAnalyze";
-import { AnalysisResponseSchema } from "@/lib/schemas/mvp";
+import { runAnalysis } from "@/lib/engine/engine";
+import { AnalyzeRequestSchema, IntakeAnswersSchema } from "@/lib/engine/schemas";
 
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
-const MAX_RAWTEXT_LENGTH = 6000;
-const MIN_EXTRACTED_TEXT = 50;
-const MIN_TEXT_LENGTH = 50;
+const MAX_RAWTEXT_LENGTH = 8000;
+const MIN_EXTRACTED_TEXT = 120;
+const MIN_TEXT_LENGTH = 200;
 
 const TextInputSchema = z.object({
   text: z.string().trim().min(MIN_TEXT_LENGTH, "Text is too short."),
@@ -15,11 +15,16 @@ const TextInputSchema = z.object({
 
 export const runtime = "nodejs";
 
-function errorResponse(code: string, message: string) {
-  return NextResponse.json({ ok: false, error: { code, message } }, { status: 400 });
+function errorResponse(code: string, message: string, status = 400) {
+  return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-async function parseRequest(req: Request): Promise<{ file: File | null; textInput: string }> {
+async function parseRequest(req: Request): Promise<{
+  file: File | null;
+  textInput: string;
+  intakeInput?: unknown;
+  horizonDays?: string;
+}> {
   const contentType = req.headers.get("content-type") || "";
 
   if (contentType.includes("multipart/form-data")) {
@@ -33,13 +38,22 @@ async function parseRequest(req: Request): Promise<{ file: File | null; textInpu
         : filesEntry.find((entry): entry is File => entry instanceof File) ?? null;
 
     const textInput = form.get("text")?.toString() ?? "";
-    return { file, textInput };
+    const intakeInput = form.get("intake")?.toString();
+    const horizonDays = form.get("horizonDays")?.toString();
+    return { file, textInput, intakeInput, horizonDays };
   }
 
   if (contentType.includes("application/json")) {
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const textInput = typeof body?.text === "string" ? body.text : "";
-    return { file: null, textInput };
+    const intakeInput = body?.intake ?? undefined;
+    const horizonDays =
+      typeof body?.horizonDays === "string"
+        ? body.horizonDays
+        : typeof body?.horizonDays === "number"
+          ? String(body.horizonDays)
+          : undefined;
+    return { file: null, textInput, intakeInput, horizonDays };
   }
 
   const textInput = await req.text().catch(() => "");
@@ -47,7 +61,7 @@ async function parseRequest(req: Request): Promise<{ file: File | null; textInpu
 }
 
 export async function POST(req: Request) {
-  const { file, textInput } = await parseRequest(req);
+  const { file, textInput, intakeInput, horizonDays } = await parseRequest(req);
 
   let rawText = "";
 
@@ -71,8 +85,8 @@ export async function POST(req: Request) {
       rawText = rawText.trim();
       if (rawText.length < MIN_EXTRACTED_TEXT) {
         return errorResponse(
-          "PDF_TEXT_TOO_LOW",
-          "This PDF looks scanned/image-based, so we can’t extract text. Please paste the scorecard text, or upload a text-based PDF."
+          "SCANNED_PDF",
+          "Scanned PDFs aren’t supported yet. Try exporting a text-based PDF or paste the scorecard text."
         );
       }
     } else if (["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
@@ -85,10 +99,20 @@ export async function POST(req: Request) {
     }
   }
 
+  if (rawText && rawText.length < MIN_TEXT_LENGTH) {
+    return errorResponse(
+      "INVALID_TEXT",
+      "We need a bit more text to analyze. Please paste more detail or upload a fuller scorecard."
+    );
+  }
+
   if (!rawText && textInput.trim()) {
     const parsed = TextInputSchema.safeParse({ text: textInput });
     if (!parsed.success) {
-      return errorResponse("INVALID_TEXT", "Please paste at least a few lines of mock scorecard text.");
+      return errorResponse(
+        "INVALID_TEXT",
+        "Please paste at least a few lines of mock scorecard text (200+ characters)."
+      );
     }
     rawText = parsed.data.text;
   }
@@ -99,12 +123,47 @@ export async function POST(req: Request) {
   }
 
   const normalizedText = rawText.slice(0, MAX_RAWTEXT_LENGTH);
-  const analysis = await analyzeMockText(normalizedText);
+  let intakePayload: unknown | null = null;
+  if (intakeInput) {
+    if (typeof intakeInput === "string") {
+      try {
+        intakePayload = JSON.parse(intakeInput);
+      } catch {
+        intakePayload = null;
+      }
+    } else {
+      intakePayload = intakeInput;
+    }
+  }
+  const intakeParsed = intakePayload ? IntakeAnswersSchema.safeParse(intakePayload) : null;
+  const parsedHorizon =
+    horizonDays === "14" ? 14 : horizonDays === "7" ? 7 : undefined;
 
-  const response = AnalysisResponseSchema.parse({
-    ok: true,
-    analysis,
+  const requestPayload = AnalyzeRequestSchema.safeParse({
+    intake: intakeParsed?.success ? intakeParsed.data : undefined,
+    source: file ? "pdf" : "text",
+    text: normalizedText,
+    horizonDays: parsedHorizon,
   });
 
-  return NextResponse.json(response);
+  if (!requestPayload.success) {
+    return errorResponse("INVALID_REQUEST", "Please check your inputs and try again.");
+  }
+
+  try {
+    const result = await runAnalysis({
+      intake: requestPayload.data.intake,
+      text: requestPayload.data.text,
+      horizonDays: requestPayload.data.horizonDays,
+    });
+
+    return NextResponse.json({ ok: true, result });
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message === "OPENAI_KEY_MISSING"
+        ? "OpenAI API key is missing. Add OPENAI_API_KEY to use analysis."
+        : "We hit a snag generating the report. Please try again in a moment.";
+
+    return errorResponse("ANALYZE_FAILED", message, 500);
+  }
 }
