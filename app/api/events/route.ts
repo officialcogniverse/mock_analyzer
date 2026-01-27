@@ -23,6 +23,7 @@ export async function POST(req: Request) {
   const parsed = EventRequestSchema.safeParse(payload);
 
   const userId = await getOrCreateUserId();
+  const isAuthed = !userId.startsWith("anon_");
   const state = await getUserState(userId);
   const fallback = createDefaultEventResponse({
     userId: state.userId,
@@ -41,8 +42,10 @@ export async function POST(req: Request) {
 
   const event = normalizeEvent(userId, parsed.data);
   const nextState = applyEventToState(state, event);
-  await logEvent(event);
-  await saveUserState(nextState);
+  if (isAuthed) {
+    await logEvent(event);
+    await saveUserState(nextState);
+  }
 
   const response = EventResponseSchema.parse({
     ok: true,

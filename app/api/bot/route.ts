@@ -16,6 +16,14 @@ const BotRequestSchema = z
 export async function POST(req: Request) {
   const payload = await req.json().catch(() => null);
   const parsed = BotRequestSchema.safeParse(payload);
+  const userId = await getOrCreateUserId();
+  const state = await getUserState(userId);
+  const fallback = createDefaultBotResponse({
+    userId: state.userId,
+    version: state.version,
+    signals: state.signals,
+    facts: state.facts,
+    lastUpdated: state.updatedAt,
 
   // Make fallback safe even if state fails
   let userId = "anon";
