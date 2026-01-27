@@ -95,7 +95,10 @@ export default function HomePage() {
           Cogniverse Mock Analyzer
         </p>
         <h1 className="text-display">Bot-first mock analysis, built for momentum.</h1>
-        <p className="text-muted max-w-2xl">{headerSubtitle}</p>
+        <p className="text-foreground/80 max-w-2xl">
+  {headerSubtitle}
+</p>
+
       </header>
 
       <section className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr]">

@@ -123,6 +123,7 @@ export const AnalyzeResponseSchema = z
 export const BotDirectiveSchema = z.union([
   z.object({ type: z.literal("suggest_action"), actionId: z.string() }),
   z.object({ type: z.literal("regenerate_plan"), reason: z.string() }),
+  z.object({ type: z.literal("note"), text: z.string() }),
   z.object({
     type: z.literal("ask_intake"),
     fields: z.array(

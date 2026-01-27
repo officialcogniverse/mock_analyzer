@@ -3,6 +3,7 @@ import { AnalyzeRequestSchema, type IntakeAnswers } from "@/lib/engine/schemas";
 import {
   createDefaultAnalyzeResponse,
   createDefaultBotResponse,
+  BotDirectiveSchema,
   ExecutionPlanSchema,
   type AnalyzeResponse,
   type BotResponse,
@@ -12,9 +13,53 @@ import {
   type StateSnapshot,
   safeParseOrDefault,
 } from "@/lib/contracts";
+
 import { getUserState, logEvent, saveUserState } from "@/lib/state/persistence";
 import { applyEventToState, type EventRecord, type UserState } from "@/lib/state/envelope";
 import { normalizeEvent } from "@/lib/events/registry";
+
+/**
+ * Faculty-grade Cogniverse prompts.
+ * - Not therapy: exam performance + execution psychology
+ * - Output must be strict JSON for contract safety
+ */
+const FACULTY_SYSTEM_PROMPT = `
+You are Cogniverse Faculty Companion — a top-class competitive exam mentor + performance psychologist.
+You specialize in score uplift. You diagnose what is costing marks and prescribe precise execution fixes.
+
+Mission:
+- Identify likely error drivers (concept gaps, careless mistakes, time management, question selection, pressure response).
+- Reduce decision fatigue with ONE clear next step (or at most 2).
+- Keep tone calm, firm, and practical. No hype. No shame.
+
+Hard rules:
+1) Output MUST be valid JSON only. No markdown. No extra text.
+2) Output MUST match exactly:
+{
+  "message": string,
+  "directives": BotDirective[]
+}
+3) BotDirective MUST be one of:
+- { "type": "suggest_action", "actionId": string }
+- { "type": "regenerate_plan", "reason": string }
+- { "type": "ask_intake", "fields": [{ "key": string, "label": string, "type": "text"|"number"|"select", "options"?: string[] }] }
+- { "type": "log_feedback", "key": string, "value": any }
+4) directives must be an array of OBJECTS (never strings).
+5) If an actionId is not available, DO NOT invent it. Use directives: [] or ask_intake.
+6) Ask at most 2 questions at a time, only if truly needed to decide the next step.
+7) You are not a doctor/therapist. Do not diagnose medical or mental conditions.
+`.trim();
+
+const ANALYZE_SYSTEM_PROMPT = `
+You are Cogniverse Faculty Coach returning JSON only.
+You convert a mock summary into:
+- nextBestActions that are fully instructional (when/what/duration/stopping condition/success criteria)
+- a lightweight execution plan (7/14 days) that improves marks via accuracy + pacing + selection
+Hard rules:
+- Output JSON only.
+- Include "nextBestActions" (array) and "executionPlan" (object).
+- Keep actions practical, repeatable, and measurable.
+`.trim();
 
 const DEFAULT_ACTIONS: NextBestAction[] = [
   {
@@ -86,14 +131,11 @@ function createPlanFromActions(actions: NextBestAction[], horizonDays: 7 | 14): 
         },
       ],
       totalMin: action.instructions.durationMin,
-      confidenceNote: "Keep it slow and repeatable.",
+      confidenceNote: "Keep it calm, repeatable, and measurable.",
     };
   });
 
-  return {
-    horizonDays,
-    days,
-  };
+  return { horizonDays, days };
 }
 
 function toStateSnapshot(state: UserState): StateSnapshot {
@@ -122,10 +164,12 @@ async function callLlmJson(system: string, user: string): Promise<unknown | null
       ],
       {
         model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-        temperature: 0.3,
-        maxTokens: 1300,
+        temperature: 0.25,
+        maxTokens: 1400,
       }
     );
+
+    // Best-effort JSON extraction (defensive)
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
     const json = start !== -1 && end !== -1 ? raw.slice(start, end + 1) : raw;
@@ -135,10 +179,33 @@ async function callLlmJson(system: string, user: string): Promise<unknown | null
   }
 }
 
+function coerceBotDirectives(raw: unknown): BotResponse["directives"] {
+  if (!Array.isArray(raw)) return [];
+
+  const normalized = raw
+    .filter(Boolean)
+    .map((d) => {
+      if (typeof d === "string") {
+        const s = d.trim();
+
+        // Common LLM shorthand patterns → structured directives
+        const m1 = s.match(/^suggest_action\s*:\s*(.+)$/i);
+        if (m1) return { type: "suggest_action", actionId: m1[1].trim() };
+
+        const m2 = s.match(/^regenerate_plan\s*:\s*(.+)$/i);
+        if (m2) return { type: "regenerate_plan", reason: m2[1].trim() };
+
+        return null;
+      }
+      return d;
+    })
+    .filter(Boolean);
+
+  return safeParseOrDefault(BotDirectiveSchema.array(), normalized, []);
+}
+
 function buildFallbackActions(text: string): NextBestAction[] {
-  if (text.length < 400) {
-    return DEFAULT_ACTIONS.slice(0, 3);
-  }
+  if (text.length < 400) return DEFAULT_ACTIONS.slice(0, 3);
   return DEFAULT_ACTIONS;
 }
 
@@ -175,10 +242,7 @@ export async function analyzeMockAndPlan(input: {
     return {
       ...fallback,
       ok: false,
-      error: {
-        code: "INVALID_REQUEST",
-        message: "Please check your input and try again.",
-      },
+      error: { code: "INVALID_REQUEST", message: "Please check your input and try again." },
     };
   }
 
@@ -187,6 +251,7 @@ export async function analyzeMockAndPlan(input: {
 
   let nextState = state;
   const events: EventRecord[] = [];
+
   const mockEvent = normalizeEvent(input.userId, {
     type: "mock_analyzed",
     payload: {
@@ -213,19 +278,19 @@ export async function analyzeMockAndPlan(input: {
   let llmPlan: ExecutionPlan | null = null;
 
   const llmPayload = await callLlmJson(
-    "You are a calm study coach returning JSON only.",
-    `Generate 5 next best actions and a ${horizonDays}-day plan for this mock summary.\n${input.text.slice(0, 1200)}`
+    ANALYZE_SYSTEM_PROMPT,
+    `Generate 5 nextBestActions and an executionPlan (${horizonDays} days) from this mock text/summary.
+Return JSON with keys: { "nextBestActions": [...], "executionPlan": {...} }.
+Mock:
+${input.text.slice(0, 1600)}`
   );
 
   if (llmPayload && typeof llmPayload === "object") {
     const maybeActions = (llmPayload as any).nextBestActions;
     const maybePlan = (llmPayload as any).executionPlan;
+
     if (Array.isArray(maybeActions)) {
-      llmActions = safeParseOrDefault(
-        NextBestActionSchema.array(),
-        maybeActions,
-        actions
-      );
+      llmActions = safeParseOrDefault(NextBestActionSchema.array(), maybeActions, actions);
     }
     if (maybePlan && typeof maybePlan === "object") {
       llmPlan = safeParseOrDefault(ExecutionPlanSchema, maybePlan, executionPlan);
@@ -247,29 +312,64 @@ export async function analyzeMockAndPlan(input: {
   };
 }
 
-export async function respondBot(input: {
-  userId: string;
-  message: string;
-}): Promise<BotResponse> {
+export async function respondBot(input: { userId: string; message: string }): Promise<BotResponse> {
   const state = await getUserState(input.userId);
   const fallback = createDefaultBotResponse(toStateSnapshot(state));
 
-  const llmPayload = await callLlmJson(
-    "You are a calm, supportive execution companion.",
-    `State: ${JSON.stringify({ signals: state.signals, facts: state.facts })}\nUser: ${input.message}\nReturn JSON with message and directives array.`
-  );
+  const availableActionIds: string[] = Array.isArray((state.facts as any)?.nextBestActions)
+    ? (state.facts as any).nextBestActions
+        .map((a: any) => (typeof a?.id === "string" ? a.id : null))
+        .filter(Boolean)
+    : [];
 
-  let message = "I’m here with you. Tell me what feels most urgent right now.";
+  const userPrompt = `
+You will be given:
+- STATE: a JSON object with signals and facts (may be incomplete)
+- USER_MESSAGE: what the student just said
+- AVAILABLE_ACTION_IDS: action IDs you may reference if you want to suggest one
+
+You must:
+- Speak like a top competitive-exam faculty focused on score uplift + execution psychology.
+- Identify what is likely costing marks (accuracy/time/selection/pressure).
+- Give ONE crisp next step with a timebox and success criteria in the message.
+- Ask at most 2 questions only if required.
+
+STATE:
+${JSON.stringify({ signals: state.signals ?? {}, facts: state.facts ?? {} })}
+
+AVAILABLE_ACTION_IDS:
+${JSON.stringify(availableActionIds)}
+
+USER_MESSAGE:
+${input.message}
+
+Return JSON only:
+{ "message": string, "directives": BotDirective[] }
+Rules:
+- directives must be objects (never strings).
+- Do NOT invent actionId. Only use AVAILABLE_ACTION_IDS if you emit suggest_action.
+- If unsure, directives: [].
+`.trim();
+
+  const llmPayload = await callLlmJson(FACULTY_SYSTEM_PROMPT, userPrompt);
+
+  let message =
+    "Tell me two things: (1) your target score/percentile, (2) what felt hardest in this mock — accuracy, time, or selection. Then I’ll give you a precise plan.";
   let directives: BotResponse["directives"] = [];
 
   if (llmPayload && typeof llmPayload === "object") {
     const maybeMessage = (llmPayload as any).message;
     if (typeof maybeMessage === "string" && maybeMessage.trim()) {
-      message = maybeMessage;
+      message = maybeMessage.trim();
     }
-    if (Array.isArray((llmPayload as any).directives)) {
-      directives = (llmPayload as any).directives as BotResponse["directives"];
-    }
+
+    directives = coerceBotDirectives((llmPayload as any).directives);
+
+    // Extra safety: if suggest_action is present, ensure it references allowed IDs
+    directives = directives.filter((d) => {
+      if (d.type !== "suggest_action") return true;
+      return availableActionIds.includes(d.actionId);
+    });
   }
 
   const chatEvent = normalizeEvent(input.userId, {

@@ -16,47 +16,95 @@ const BotRequestSchema = z
 export async function POST(req: Request) {
   const payload = await req.json().catch(() => null);
   const parsed = BotRequestSchema.safeParse(payload);
-  const userId = getOrCreateUserId();
-  const state = await getUserState(userId);
-  const fallback = createDefaultBotResponse({
-    userId: state.userId,
-    version: state.version,
-    signals: state.signals,
-    facts: state.facts,
-    lastUpdated: state.updatedAt,
+
+  // Make fallback safe even if state fails
+  let userId = "anon";
+  let fallback = createDefaultBotResponse({
+    userId,
+    version: 1,
+    signals: {},
+    facts: {},
+    lastUpdated: new Date().toISOString(),
   });
+
+  try {
+    userId = await getOrCreateUserId();
+    const state = await getUserState(userId);
+    fallback = createDefaultBotResponse({
+      userId: state.userId,
+      version: state.version,
+      signals: state.signals,
+      facts: state.facts,
+      lastUpdated: state.updatedAt,
+    });
+  } catch (e) {
+    console.error("[api/bot] state bootstrap failed:", e);
+    // continue with safe fallback
+  }
 
   if (!parsed.success) {
     return NextResponse.json(
       { ...fallback, ok: false, error: { code: "INVALID_BOT", message: "Message required." } },
-      { status: 400 }
+      { status: 200 } // IMPORTANT: keep UI stable
     );
   }
 
-  try {
+    try {
     const response = await respondBot({ userId, message: parsed.data.message });
 
-    const normalized = BotResponseSchema.parse({
+    // Normalize directives: some engines return string[]; contract expects object[]
+    const safeDirectives = Array.isArray((response as any)?.directives)
+      ? (response as any).directives
+          .filter(Boolean)
+          .map((d: any) => (typeof d === "string" ? { type: "note", text: d } : d))
+      : [];
+
+    const normalized = BotResponseSchema.safeParse({
       ...response,
-      stateSnapshot: {
-        userId: response.stateSnapshot.userId,
-        version: response.stateSnapshot.version,
-        signals: response.stateSnapshot.signals,
-        facts: response.stateSnapshot.facts,
-        lastUpdated: response.stateSnapshot.lastUpdated,
-      },
+      directives: safeDirectives,
+      stateSnapshot: (response as any)?.stateSnapshot
+        ? {
+            userId: (response as any).stateSnapshot.userId ?? fallback.stateSnapshot.userId,
+            version: (response as any).stateSnapshot.version ?? fallback.stateSnapshot.version,
+            signals: (response as any).stateSnapshot.signals ?? fallback.stateSnapshot.signals,
+            facts: (response as any).stateSnapshot.facts ?? fallback.stateSnapshot.facts,
+            lastUpdated:
+              (response as any).stateSnapshot.lastUpdated ?? fallback.stateSnapshot.lastUpdated,
+          }
+        : fallback.stateSnapshot,
     });
 
-    return NextResponse.json(normalized);
+    if (!normalized.success) {
+      console.error("[api/bot] schema mismatch:", normalized.error);
+      return NextResponse.json(
+        {
+          ...fallback,
+          ok: false,
+          error: {
+            code: "BOT_SCHEMA",
+            message: "Bot response was invalid. Fix respondBot contract.",
+          },
+        },
+        { status: 200 }
+      );
+    }
+
+    return NextResponse.json(normalized.data, { status: 200 });
   } catch (error) {
+
+    console.error("[api/bot] respondBot failed:", error);
+
+    const msg = error instanceof Error ? error.message : String(error);
+
     const message =
-      error instanceof Error && error.message === "OPENAI_KEY_MISSING"
-        ? "OpenAI API key is missing. Add OPENAI_API_KEY to use the bot."
+      msg.includes("OPENAI") || msg.includes("api key") || msg.includes("API_KEY")
+        ? "OpenAI configuration is missing or invalid. Set OPENAI_API_KEY and restart."
         : "The bot is having trouble right now. Please try again soon.";
 
     return NextResponse.json(
-      { ...fallback, ok: false, error: { code: "BOT_UNAVAILABLE", message } },
-      { status: 500 }
+      { ...fallback, ok: false, error: { code: "BOT_UNAVAILABLE", message, debug: process.env.NODE_ENV === "development" ? msg : undefined } },
+      { status: 200 } // IMPORTANT: do NOT 500 the UI
     );
   }
 }
+
