@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { IntakeBot } from "@/components/landing/IntakeBot";
+import { InstrumentedAttemptPanel } from "@/components/landing/InstrumentedAttemptPanel";
 import { ReportView } from "@/components/landing/ReportView";
 import { UploadPanel } from "@/components/landing/UploadPanel";
 import type { AnalyzeResponse } from "@/lib/contracts";
@@ -12,45 +13,41 @@ const STORAGE_KEYS = {
   report: "cogniverse_report_v1",
   mockText: "cogniverse_mocktext_v1",
   horizon: "cogniverse_horizon_v1",
+  lastReport: "cv.lastReport.v1",
 };
 
 export default function HomePage() {
-  const [intake, setIntake] = useState<IntakeAnswers>({});
-  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
-  const [mockText, setMockText] = useState("");
-  const [horizonDays, setHorizonDays] = useState<7 | 14>(7);
+  const [intake, setIntake] = useState<IntakeAnswers>(() => {
+    if (typeof window === "undefined") return {};
+    const stored = localStorage.getItem(STORAGE_KEYS.intake);
+    if (!stored) return {};
+    try {
+      return JSON.parse(stored) as IntakeAnswers;
+    } catch {
+      return {};
+    }
+  });
+  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(() => {
+    if (typeof window === "undefined") return null;
+    const stored =
+      localStorage.getItem(STORAGE_KEYS.report) ?? localStorage.getItem(STORAGE_KEYS.lastReport);
+    if (!stored) return null;
+    try {
+      return JSON.parse(stored) as AnalyzeResponse;
+    } catch {
+      return null;
+    }
+  });
+  const [mockText, setMockText] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem(STORAGE_KEYS.mockText) ?? "";
+  });
+  const [horizonDays, setHorizonDays] = useState<7 | 14>(() => {
+    if (typeof window === "undefined") return 7;
+    return localStorage.getItem(STORAGE_KEYS.horizon) === "14" ? 14 : 7;
+  });
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const storedIntake = localStorage.getItem(STORAGE_KEYS.intake);
-    const storedReport = localStorage.getItem(STORAGE_KEYS.report);
-    const storedMock = localStorage.getItem(STORAGE_KEYS.mockText);
-    const storedHorizon = localStorage.getItem(STORAGE_KEYS.horizon);
-
-    if (storedIntake) {
-      try {
-        setIntake(JSON.parse(storedIntake));
-      } catch {
-        setIntake({});
-      }
-    }
-
-    if (storedReport) {
-      try {
-        setAnalysis(JSON.parse(storedReport));
-      } catch {
-        setAnalysis(null);
-      }
-    }
-
-    if (storedMock) {
-      setMockText(storedMock);
-    }
-
-    if (storedHorizon === "14") {
-      setHorizonDays(14);
-    }
-  }, []);
+  const [mode, setMode] = useState<"quick" | "instrument">("quick");
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.intake, JSON.stringify(intake));
@@ -59,6 +56,7 @@ export default function HomePage() {
   useEffect(() => {
     if (analysis) {
       localStorage.setItem(STORAGE_KEYS.report, JSON.stringify(analysis));
+      localStorage.setItem(STORAGE_KEYS.lastReport, JSON.stringify(analysis));
     } else {
       localStorage.removeItem(STORAGE_KEYS.report);
     }
@@ -99,21 +97,57 @@ export default function HomePage() {
       </header>
 
       <section className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr]">
-        <UploadPanel
-          intake={intake}
-          mockText={mockText}
-          horizonDays={horizonDays}
-          onMockTextChange={setMockText}
-          onHorizonChange={setHorizonDays}
-          onReport={setAnalysis}
-          onLoadingChange={setLoading}
-          onReset={handleReset}
-        />
+        <div className="space-y-6">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={`rounded-full border px-4 py-2 text-sm ${
+                mode === "quick"
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border/70 text-muted-foreground hover:border-primary/70"
+              }`}
+              onClick={() => setMode("quick")}
+            >
+              Quick Analyze (Upload/Paste)
+            </button>
+            <button
+              type="button"
+              className={`rounded-full border px-4 py-2 text-sm ${
+                mode === "instrument"
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border/70 text-muted-foreground hover:border-primary/70"
+              }`}
+              onClick={() => setMode("instrument")}
+            >
+              Instrumented Attempt (Mode 2)
+            </button>
+          </div>
+
+          {mode === "quick" ? (
+            <UploadPanel
+              intake={intake}
+              mockText={mockText}
+              horizonDays={horizonDays}
+              onMockTextChange={setMockText}
+              onHorizonChange={setHorizonDays}
+              onReport={setAnalysis}
+              onLoadingChange={setLoading}
+              onReset={handleReset}
+            />
+          ) : (
+            <InstrumentedAttemptPanel onReport={setAnalysis} onLoadingChange={setLoading} />
+          )}
+        </div>
+
         <IntakeBot intake={intake} onIntakeChange={setIntake} analysis={analysis} onReset={handleReset} />
       </section>
 
       <section className="mt-10">
-        <ReportView analysis={analysis} loading={loading} />
+        <ReportView
+          key={analysis?.meta?.requestId ?? (analysis ? "report" : "empty")}
+          analysis={analysis}
+          loading={loading}
+        />
       </section>
     </main>
   );

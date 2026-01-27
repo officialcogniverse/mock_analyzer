@@ -117,6 +117,63 @@ export function applyEventToState(state: UserState, event: EventRecord): UserSta
         ...event.payload,
       };
       break;
+    case "instrument_started":
+      nextFacts["mode2.startedAt"] = event.ts;
+      if (event.payload?.template) {
+        nextFacts["mode2.template"] = event.payload.template;
+      }
+      if (event.payload?.attemptId) {
+        nextFacts["mode2.attemptId"] = event.payload.attemptId;
+      }
+      break;
+    case "instrument_question_updated": {
+      const sectionIndex = event.payload?.sectionIndex;
+      const questionIndex = event.payload?.questionIndex;
+      const key =
+        typeof event.payload?.questionKey === "string"
+          ? event.payload.questionKey
+          : typeof sectionIndex === "number" && typeof questionIndex === "number"
+            ? `${sectionIndex}:${questionIndex}`
+            : null;
+      if (key) {
+        nextFacts[`mode2.q.${key}`] = {
+          ...event.payload,
+          updatedAt: event.payload?.updatedAt ?? event.ts,
+        };
+      }
+      break;
+    }
+    case "instrument_finished":
+      if (event.payload?.summary) {
+        nextFacts["mode2.summary"] = event.payload.summary;
+      }
+      if (event.payload?.template) {
+        nextFacts["mode2.template"] = event.payload.template;
+      }
+      if (event.payload?.dominantErrorType) {
+        nextFacts["mode2.dominantErrorType"] = event.payload.dominantErrorType;
+      }
+      if (event.payload?.timePressureProxy !== undefined) {
+        nextSignals["timePressure.proxy"] = event.payload.timePressureProxy;
+      }
+      if (event.payload?.errorSignals && typeof event.payload.errorSignals === "object") {
+        for (const [key, value] of Object.entries(event.payload.errorSignals)) {
+          nextSignals[`errors.${key}.count`] = value;
+        }
+      }
+      nextFacts["mode2.completedAt"] = event.ts;
+      break;
+    case "plan_step_started":
+    case "plan_step_completed":
+    case "plan_step_skipped": {
+      const stepId = event.payload?.stepId;
+      if (typeof stepId === "string" && stepId.trim()) {
+        const status = event.type.replace("plan_step_", "");
+        nextFacts[`plan.step.${stepId}.status`] = status;
+        nextFacts[`plan.step.${stepId}.updatedAt`] = event.ts;
+      }
+      break;
+    }
     default:
       nextFacts.lastUnknownEvent = {
         ts: event.ts,

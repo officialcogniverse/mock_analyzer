@@ -142,6 +142,48 @@ function buildFallbackActions(text: string): NextBestAction[] {
   return DEFAULT_ACTIONS;
 }
 
+export async function generateNextActionsAndPlan(input: {
+  state: UserState;
+  inputSummary: string;
+  horizonDays?: 7 | 14;
+}): Promise<{ nextBestActions: NextBestAction[]; executionPlan: ExecutionPlan }> {
+  const horizonDays = input.horizonDays ?? 7;
+  const actions = buildFallbackActions(input.inputSummary);
+  const executionPlan = createPlanFromActions(actions, horizonDays);
+
+  let llmActions: NextBestAction[] | null = null;
+  let llmPlan: ExecutionPlan | null = null;
+
+  const llmPayload = await callLlmJson(
+    "You are a calm study coach returning JSON only.",
+    `State: ${JSON.stringify({ signals: input.state.signals, facts: input.state.facts })}\nGenerate 5 next best actions and a ${horizonDays}-day plan for this mock summary.\n${input.inputSummary.slice(0, 1200)}`
+  );
+
+  if (llmPayload && typeof llmPayload === "object") {
+    const maybeActions = (llmPayload as any).nextBestActions;
+    const maybePlan = (llmPayload as any).executionPlan;
+    if (Array.isArray(maybeActions)) {
+      llmActions = safeParseOrDefault(
+        NextBestActionSchema.array(),
+        maybeActions,
+        actions
+      ) as NextBestAction[];
+    }
+    if (maybePlan && typeof maybePlan === "object") {
+      llmPlan = safeParseOrDefault(
+        ExecutionPlanSchema,
+        maybePlan,
+        executionPlan
+      ) as ExecutionPlan;
+    }
+  }
+
+  return {
+    nextBestActions: llmActions ?? actions,
+    executionPlan: llmPlan ?? executionPlan,
+  };
+}
+
 export async function analyzeMockAndPlan(input: {
   userId: string;
   text: string;
@@ -182,11 +224,7 @@ export async function analyzeMockAndPlan(input: {
     };
   }
 
-  const actions = buildFallbackActions(input.text);
-  const executionPlan = createPlanFromActions(actions, horizonDays);
-
   let nextState = state;
-  const events: EventRecord[] = [];
   const mockEvent = normalizeEvent(input.userId, {
     type: "mock_analyzed",
     payload: {
@@ -195,42 +233,23 @@ export async function analyzeMockAndPlan(input: {
       summary: safeSummaryFromText(input.text),
     },
   });
-  events.push(mockEvent);
+  nextState = applyEventToState(nextState, mockEvent);
+  await logEvent(mockEvent);
+  await saveUserState(nextState);
+
+  const { nextBestActions, executionPlan } = await generateNextActionsAndPlan({
+    state: nextState,
+    inputSummary: input.text,
+    horizonDays,
+  });
 
   const planEvent = normalizeEvent(input.userId, {
     type: "plan_generated",
-    payload: { horizonDays, actionCount: actions.length },
+    payload: { horizonDays, actionCount: nextBestActions.length },
   });
-  events.push(planEvent);
-
-  for (const event of events) {
-    nextState = applyEventToState(nextState, event);
-    await logEvent(event);
-  }
+  nextState = applyEventToState(nextState, planEvent);
+  await logEvent(planEvent);
   await saveUserState(nextState);
-
-  let llmActions: NextBestAction[] | null = null;
-  let llmPlan: ExecutionPlan | null = null;
-
-  const llmPayload = await callLlmJson(
-    "You are a calm study coach returning JSON only.",
-    `Generate 5 next best actions and a ${horizonDays}-day plan for this mock summary.\n${input.text.slice(0, 1200)}`
-  );
-
-  if (llmPayload && typeof llmPayload === "object") {
-    const maybeActions = (llmPayload as any).nextBestActions;
-    const maybePlan = (llmPayload as any).executionPlan;
-    if (Array.isArray(maybeActions)) {
-      llmActions = safeParseOrDefault(
-        NextBestActionSchema.array(),
-        maybeActions,
-        actions
-      );
-    }
-    if (maybePlan && typeof maybePlan === "object") {
-      llmPlan = safeParseOrDefault(ExecutionPlanSchema, maybePlan, executionPlan);
-    }
-  }
 
   return {
     ...fallback,
@@ -241,8 +260,8 @@ export async function analyzeMockAndPlan(input: {
       extractedChars: input.extractedChars ?? input.text.length,
       scannedPdf: input.scannedPdf ?? false,
     },
-    nextBestActions: llmActions ?? actions,
-    executionPlan: llmPlan ?? executionPlan,
+    nextBestActions,
+    executionPlan,
     stateSnapshot: toStateSnapshot(nextState),
   };
 }
